@@ -1777,7 +1777,7 @@ const getActivePositions = async (req, res) => {
                 OR UPPER(t.symbol) COLLATE utf8mb4_unicode_ci = UPPER(st.tradingsymbol) COLLATE utf8mb4_unicode_ci
             LEFT JOIN commodity_forex_crypto_lot_sizes cfl
                 ON UPPER(t.symbol) COLLATE utf8mb4_unicode_ci = UPPER(cfl.symbol) COLLATE utf8mb4_unicode_ci
-            LEFT JOIN scrip_data sd ON t.symbol COLLATE utf8mb4_unicode_ci = sd.symbol COLLATE utf8mb4_unicode_ci
+            LEFT JOIN scrip_data sd ON t.symbol = sd.symbol
             WHERE t.status IN ('OPEN', 'HOLD')
               AND t.is_pending = 0
         `;
@@ -1900,7 +1900,7 @@ const getTrades = async (req, res) => {
                 OR UPPER(t.symbol) COLLATE utf8mb4_unicode_ci = CONCAT('FOREX:', UPPER(cfl.symbol)) COLLATE utf8mb4_unicode_ci
                 OR UPPER(t.symbol) COLLATE utf8mb4_unicode_ci = CONCAT('CRYPTO:', UPPER(cfl.symbol)) COLLATE utf8mb4_unicode_ci
                 OR REPLACE(REPLACE(REPLACE(REPLACE(UPPER(t.symbol), 'COMMODITY:', ''), 'FOREX:', ''), 'CRYPTO:', ''), '/', '') COLLATE utf8mb4_unicode_ci = REPLACE(UPPER(cfl.symbol), '/', '') COLLATE utf8mb4_unicode_ci
-            LEFT JOIN scrip_data sd ON t.symbol COLLATE utf8mb4_unicode_ci = sd.symbol COLLATE utf8mb4_unicode_ci
+            LEFT JOIN scrip_data sd ON t.symbol = sd.symbol
             WHERE 1=1`;
         const params = [];
 
@@ -2252,7 +2252,7 @@ const getTradeById = async (req, res) => {
                  OR UPPER(t.symbol) COLLATE utf8mb4_unicode_ci = CONCAT('FOREX:', UPPER(cfl.symbol)) COLLATE utf8mb4_unicode_ci
                  OR UPPER(t.symbol) COLLATE utf8mb4_unicode_ci = CONCAT('CRYPTO:', UPPER(cfl.symbol)) COLLATE utf8mb4_unicode_ci
                  OR REPLACE(REPLACE(REPLACE(REPLACE(UPPER(t.symbol), 'COMMODITY:', ''), 'FOREX:', ''), 'CRYPTO:', ''), '/', '') COLLATE utf8mb4_unicode_ci = REPLACE(UPPER(cfl.symbol), '/', '') COLLATE utf8mb4_unicode_ci
-             LEFT JOIN scrip_data sd ON t.symbol COLLATE utf8mb4_unicode_ci = sd.symbol COLLATE utf8mb4_unicode_ci
+             LEFT JOIN scrip_data sd ON t.symbol = sd.symbol
              WHERE t.id = ?`,
             [req.params.id]
         );
