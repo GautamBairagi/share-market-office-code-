@@ -30,6 +30,21 @@ export const MarketDataProvider = ({ children }) => {
     const snapshotIntervalRef = useRef(null);
     const prevSectionsRef = useRef({ nse: {}, mcx: {}, nfo: {} });
 
+    // Normalized symbol -> row maps for O(1) price update merges
+    const watchlistMapRef = useRef(new Map());
+    const cryptoMapRef = useRef(new Map());
+    const forexMapRef = useRef(new Map());
+    const commodityMapRef = useRef(new Map());
+
+    const arrayToMap = (arr) => {
+        const map = new Map();
+        if (!Array.isArray(arr)) return map;
+        for (const row of arr) {
+            if (row?.symbol) map.set(row.symbol, row);
+        }
+        return map;
+    };
+
     const [binanceError, setBinanceError] = useState(null);
 
     const applyMarketSnapshot = useCallback((payload) => {
@@ -71,26 +86,27 @@ export const MarketDataProvider = ({ children }) => {
                 seen.add(r.symbol);
                 return true;
             });
+            watchlistMapRef.current = arrayToMap(deduped);
             setWatchlistRows(deduped);
         }
 
         if (Array.isArray(crypto)) {
-            setCryptoData(
-                crypto.map((c) => ({
-                    ...c,
-                    symbol: c.symbol?.startsWith('CRYPTO:') ? c.symbol : `CRYPTO:${c.symbol}`,
-                    type: 'CRYPTO'
-                }))
-            );
+            const mapped = crypto.map((c) => ({
+                ...c,
+                symbol: c.symbol?.startsWith('CRYPTO:') ? c.symbol : `CRYPTO:${c.symbol}`,
+                type: 'CRYPTO'
+            }));
+            cryptoMapRef.current = arrayToMap(mapped);
+            setCryptoData(mapped);
         }
         if (Array.isArray(forex)) {
-            setForexData(
-                forex.map((f) => ({
-                    ...f,
-                    symbol: f.symbol?.startsWith('FOREX:') ? f.symbol : `FOREX:${f.symbol}`,
-                    type: 'FOREX'
-                }))
-            );
+            const mapped = forex.map((f) => ({
+                ...f,
+                symbol: f.symbol?.startsWith('FOREX:') ? f.symbol : `FOREX:${f.symbol}`,
+                type: 'FOREX'
+            }));
+            forexMapRef.current = arrayToMap(mapped);
+            setForexData(mapped);
         }
         if (Array.isArray(commodity)) {
             const seen = new Set();
@@ -108,6 +124,7 @@ export const MarketDataProvider = ({ children }) => {
                     type: 'COMMODITY'
                 });
             }
+            commodityMapRef.current = arrayToMap(dedupedCommodity);
             setCommodityData(dedupedCommodity);
         }
         if (Array.isArray(ex)) {
@@ -116,9 +133,16 @@ export const MarketDataProvider = ({ children }) => {
         setDataReady(true);
     }, []);
 
+    const snapshotDebounceRef = useRef(null);
+
     const requestMarketSnapshot = useCallback((query = {}) => {
         const s = socketRef.current;
-        if (s?.connected) s.emit('request_market_snapshot', query);
+        if (!s?.connected) return;
+        if (snapshotDebounceRef.current) clearTimeout(snapshotDebounceRef.current);
+        snapshotDebounceRef.current = setTimeout(() => {
+            snapshotDebounceRef.current = null;
+            if (s.connected) s.emit('request_market_snapshot', query);
+        }, 500);
     }, []);
 
     const fetchWatchlist = useCallback(() => {
@@ -201,53 +225,23 @@ export const MarketDataProvider = ({ children }) => {
                 return nextRow;
             };
 
-            setWatchlistRows((prev) => {
-                if (!prev.length) return prev;
+            const applyUpdatesToMap = (mapRef, setState) => {
+                if (mapRef.current.size === 0) return;
                 let changed = false;
-                const next = prev.map((row) => {
-                    const upd = updates[row.symbol];
-                    if (!upd) return row;
-                    changed = true;
-                    return updateRowWithFlashes(row, upd);
-                });
-                return changed ? next : prev;
-            });
+                for (const [symbol, upd] of Object.entries(updates)) {
+                    const row = mapRef.current.get(symbol);
+                    if (row) {
+                        mapRef.current.set(symbol, updateRowWithFlashes(row, upd));
+                        changed = true;
+                    }
+                }
+                if (changed) setState(Array.from(mapRef.current.values()));
+            };
 
-            setCryptoData((prev) => {
-                if (!prev.length) return prev;
-                let changed = false;
-                const next = prev.map((row) => {
-                    const upd = updates[row.symbol];
-                    if (!upd) return row;
-                    changed = true;
-                    return updateRowWithFlashes(row, upd);
-                });
-                return changed ? next : prev;
-            });
-
-            setForexData((prev) => {
-                if (!prev.length) return prev;
-                let changed = false;
-                const next = prev.map((row) => {
-                    const upd = updates[row.symbol];
-                    if (!upd) return row;
-                    changed = true;
-                    return updateRowWithFlashes(row, upd);
-                });
-                return changed ? next : prev;
-            });
-
-            setCommodityData((prev) => {
-                if (!prev.length) return prev;
-                let changed = false;
-                const next = prev.map((row) => {
-                    const upd = updates[row.symbol];
-                    if (!upd) return row;
-                    changed = true;
-                    return updateRowWithFlashes(row, upd);
-                });
-                return changed ? next : prev;
-            });
+            applyUpdatesToMap(watchlistMapRef, setWatchlistRows);
+            applyUpdatesToMap(cryptoMapRef, setCryptoData);
+            applyUpdatesToMap(forexMapRef, setForexData);
+            applyUpdatesToMap(commodityMapRef, setCommodityData);
 
             setDashboardSections((prev) => {
                 prevSectionsRef.current = prev;
@@ -304,7 +298,7 @@ export const MarketDataProvider = ({ children }) => {
         };
     }, [applyMarketSnapshot]);
 
-    const value = {
+    const value = useMemo(() => ({
         watchlistRows,
         setWatchlistRows,
         fetchWatchlist,
@@ -330,7 +324,12 @@ export const MarketDataProvider = ({ children }) => {
         socketRef,
         requestMarketSnapshot,
         excludedContracts
-    };
+    }), [
+        watchlistRows, dashboardSections, dashboardGroups, dashboardCounts,
+        nseGroupCounts, cryptoData, forexData, commodityData, binanceError,
+        kiteStatus, dataReady, excludedContracts, fetchWatchlist, fetchDashboard,
+        fetchCryptoForex, checkStatus, requestMarketSnapshot
+    ]);
 
     return (
         <MarketDataContext.Provider value={value}>

@@ -4,6 +4,7 @@ const { logAction } = require('./systemController');
 const { getFromCache, saveToCache, invalidateCache } = require('../utils/cacheManager');
 const { getLotSize } = require('../utils/symbolHelper');
 const { calculateTradeBrokerage } = require('../utils/brokerageHelper');
+const { clearSegmentCache } = require('../utils/segmentPermissionHelper');
 
 const { uploadFile, deleteFile } = require('../utils/imagekit');
 
@@ -452,6 +453,8 @@ const updateClientSettings = async (req, res) => {
                 config_json = VALUES(config_json),
                 broker_id = VALUES(broker_id)
         `, sqlParams);
+
+        clearSegmentCache(req.params.id);
 
         // ─── SYNC to user_segments table for mobile app consistency ─────
         if (configObj) {

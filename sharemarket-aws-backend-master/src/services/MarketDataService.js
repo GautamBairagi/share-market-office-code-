@@ -131,12 +131,21 @@ class MarketDataService extends EventEmitter {
         this.broadcastTimer = setInterval(() => {
             if (this.dirtySymbols.size === 0) return;
 
-
+            // Cap the number of symbols processed per tick to prevent event-loop backlog
+            const MAX_DIRTY_SYMBOLS = 500;
+            const symbolsToProcess = [];
+            let count = 0;
+            for (const sym of this.dirtySymbols) {
+                symbolsToProcess.push(sym);
+                count++;
+                if (count >= MAX_DIRTY_SYMBOLS) break;
+            }
 
             const updates = {};
             const now = new Date();
 
-            this.dirtySymbols.forEach(sym => {
+            symbolsToProcess.forEach(sym => {
+                this.dirtySymbols.delete(sym);
                 if (this.prices[sym]) {
                     const priceData = { ...this.prices[sym] };
                     updates[sym] = priceData;
@@ -162,20 +171,20 @@ class MarketDataService extends EventEmitter {
                 }
             });
 
-            this.dirtySymbols.clear();
-
-            // Flush Tick Buffer to Database every 3 seconds
+            // Flush Tick Buffer to Database asynchronously so it does not block the broadcast
             if (this.tickBuffer.length > 0 && (Date.now() - this.lastTickFlush > 3000 || this.tickBuffer.length >= 100)) {
                 const batchToInsert = this.tickBuffer.splice(0, 100);
                 this.lastTickFlush = Date.now();
 
-                const db = require('../config/db');
-                db.query(`
-                    INSERT INTO scrip_ticks_history 
-                    (scrip_id, exchange_time, system_time, bid, ask, high, low, ltp, market_type) 
-                    VALUES ?
-                `, [batchToInsert]).catch(err => {
-                    // Ignore transient tick insert errors to avoid flooding console
+                setImmediate(() => {
+                    const db = require('../config/db');
+                    db.query(`
+                        INSERT INTO scrip_ticks_history 
+                        (scrip_id, exchange_time, system_time, bid, ask, high, low, ltp, market_type) 
+                        VALUES ?
+                    `, [batchToInsert]).catch(err => {
+                        // Ignore transient tick insert errors to avoid flooding console
+                    });
                 });
             }
 
@@ -433,7 +442,7 @@ class MarketDataService extends EventEmitter {
         this._startCryptoForexPush();
     }
 
-    // Push full crypto + forex lists to all socket clients every 1s.
+    // Push full crypto + forex lists to all socket clients every 3s.
     // Real-time updates for market watch.
     _startCryptoForexPush() {
         if (this._cfPushTimer) return;
@@ -484,7 +493,7 @@ class MarketDataService extends EventEmitter {
             } catch (e) {
                 console.error('[CryptoForexPush] Error:', e.message);
             }
-        }, 1000);
+        }, 3000);
     }
 
     stopCryptoForex() {

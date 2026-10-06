@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { ChevronDown, ArrowUpDown, ChevronUp, MoreHorizontal } from 'lucide-react';
 import { getTrades, BASE_URL } from '../../services/api';
 import { useMarketData } from '../../context/MarketDataContext';
@@ -12,13 +12,28 @@ const ActiveTradesPage = () => {
     const [loading, setLoading] = useState(true);
     const [view, setView] = useState('list');
     const [selectedTrade, setSelectedTrade] = useState(null);
+
+    const scripMap = useMemo(() => {
+        const map = new Map();
+        const add = (s) => {
+            if (!s?.symbol) return;
+            const sym = s.symbol.toUpperCase();
+            if (!map.has(sym)) map.set(sym, s);
+        };
+        (watchlistRows || []).forEach(add);
+        (cryptoData || []).forEach(add);
+        (forexData || []).forEach(add);
+        (commodityData || []).forEach(add);
+        return map;
+    }, [watchlistRows, cryptoData, forexData, commodityData]);
+
     useEffect(() => {
         fetchTrades();
     }, []);
 
     const fetchTrades = async () => {
         try {
-            const data = await getTrades({ status: 'OPEN', is_pending: 0 });
+            const data = await getTrades({ status: 'OPEN', is_pending: 0, limit: 1000 });
             const list = Array.isArray(data) ? data : data?.data || [];
             // Map backend data to UI fields if necessary
             setTrades(list.filter(t => !t.is_pending && t.is_pending !== 1).map(t => ({
@@ -44,13 +59,9 @@ const ActiveTradesPage = () => {
     // The backend correctly uses CommodityLotService (correct lot_size, USD/INR conversion).
     // Frontend re-calculates only when live price is available to update CMP display.
     const calculatePL = (trade) => {
-        const allScrips = [...(watchlistRows || []), ...(cryptoData || []), ...(forexData || []), ...(commodityData || [])];
         const tradeSymUpper = (trade.symbol || '').toUpperCase();
-        const scrip = allScrips.find(s => {
-            const rs = (s.symbol || '').toUpperCase();
-            const ts = rs.split(':').pop();
-            return rs === tradeSymUpper || ts === tradeSymUpper;
-        });
+        const cleanSym = tradeSymUpper.includes(':') ? tradeSymUpper.split(':')[1] : tradeSymUpper;
+        const scrip = scripMap.get(tradeSymUpper) || scripMap.get(cleanSym);
 
         // Use last_settlement_price / settlement_price as reference price if trade is carried forward / HOLD
         const isCarriedForward = trade.status === 'HOLD' || trade.is_carried_forward === 1;
@@ -74,10 +85,14 @@ const ActiveTradesPage = () => {
                 const qtyLots = parseFloat(trade.qty || 0);
                 const priceToUse = exitPrice > 0 ? exitPrice : cmp;
 
-                const usdInrScrip = forexData?.find(s => {
-                    const sym = (s.symbol || '').toUpperCase();
-                    return sym === 'FOREX:USD/INR' || sym === 'FOREX:USDINR' || sym.endsWith('USD/INR') || sym.endsWith('USDINR');
-                });
+                const usdInrScrip = scripMap.get('FOREX:USD/INR')
+                    || scripMap.get('FOREX:USDINR')
+                    || scripMap.get('USD/INR')
+                    || scripMap.get('USDINR')
+                    || forexData?.find(s => {
+                        const sym = (s.symbol || '').toUpperCase();
+                        return sym.endsWith('USD/INR') || sym.endsWith('USDINR');
+                    });
                 const liveBid = usdInrScrip ? parseFloat(usdInrScrip.bid) || null : null;
                 const liveAsk = usdInrScrip ? parseFloat(usdInrScrip.ask) || null : null;
                 const mType = (trade.market_type || '').toUpperCase();

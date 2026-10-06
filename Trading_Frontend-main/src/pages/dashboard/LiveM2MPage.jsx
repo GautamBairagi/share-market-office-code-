@@ -12,7 +12,7 @@ const LiveM2MPage = ({ onNavigate, user }) => {
 
   useEffect(() => {
     fetchM2M();
-    const interval = setInterval(fetchM2M, 1000); // Update every 1s
+    const interval = setInterval(fetchM2M, 10000); // Update every 10s to reduce load
     return () => clearInterval(interval);
   }, [isClient]);
 

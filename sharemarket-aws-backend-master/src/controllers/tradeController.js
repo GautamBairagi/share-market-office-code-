@@ -1756,7 +1756,7 @@ const getActivePositions = async (req, res) => {
 
         // Build hierarchy-aware query for OPEN, non-pending trades
         let query = `
-            SELECT
+            SELECT SQL_CALC_FOUND_ROWS
                 t.symbol,
                 t.type,
                 t.market_type,
@@ -1773,11 +1773,11 @@ const getActivePositions = async (req, res) => {
                 COUNT(*) AS trade_count
             FROM trades t
             LEFT JOIN script_testing st
-                ON UPPER(t.symbol) COLLATE utf8mb4_unicode_ci = CONCAT('NFO:', UPPER(st.tradingsymbol)) COLLATE utf8mb4_unicode_ci
-                OR UPPER(t.symbol) COLLATE utf8mb4_unicode_ci = UPPER(st.tradingsymbol) COLLATE utf8mb4_unicode_ci
+                ON UPPER(t.symbol) = CONCAT('NFO:', UPPER(st.tradingsymbol))
+                OR UPPER(t.symbol) = UPPER(st.tradingsymbol)
             LEFT JOIN commodity_forex_crypto_lot_sizes cfl
-                ON UPPER(t.symbol) COLLATE utf8mb4_unicode_ci = UPPER(cfl.symbol) COLLATE utf8mb4_unicode_ci
-            LEFT JOIN scrip_data sd ON t.symbol COLLATE utf8mb4_unicode_ci = sd.symbol COLLATE utf8mb4_unicode_ci
+                ON UPPER(t.symbol) = UPPER(cfl.symbol)
+            LEFT JOIN scrip_data sd ON t.symbol = sd.symbol
             WHERE t.status IN ('OPEN', 'HOLD')
               AND t.is_pending = 0
         `;
@@ -1811,7 +1811,27 @@ const getActivePositions = async (req, res) => {
 
         query += ` GROUP BY t.symbol, t.type, t.market_type ORDER BY t.symbol ASC`;
 
+        // Optional server-side pagination (backward-compatible)
+        const page = parseInt(req.query.page, 10) || 1;
+        const limit = parseInt(req.query.limit, 10) || null;
+        if (limit && limit > 0) {
+            const offset = (page - 1) * limit;
+            query += ' LIMIT ? OFFSET ?';
+            params.push(limit, offset);
+        }
+
         const [rows] = await db.execute(query, params);
+
+        let totalPositionsCount = rows.length;
+        if (limit && limit > 0) {
+            try {
+                const [foundRows] = await db.execute('SELECT FOUND_ROWS() as total');
+                totalPositionsCount = parseInt(foundRows[0]?.total, 10) || rows.length;
+            } catch (e) {
+                totalPositionsCount = rows.length;
+            }
+        }
+
         const commodityLotService = require('../services/CommodityLotService');
         const { MCX_LOT_SIZES } = require('../utils/symbolHelper');
 
@@ -1858,7 +1878,12 @@ const getActivePositions = async (req, res) => {
                 }
             }
         });
-        res.json(rows);
+
+        if (limit && limit > 0) {
+            res.json({ data: rows, total: totalPositionsCount, page, limit });
+        } else {
+            res.json(rows);
+        }
     } catch (err) {
         console.error('[getActivePositions] Error:', err);
         res.status(500).json({ message: 'Server Error', error: err.message });
@@ -1878,7 +1903,7 @@ const getTrades = async (req, res) => {
         //   3. commodity_forex_crypto_lot_sizes.lot_size → COMEX / FOREX / CRYPTO
         //   4. scrip_data.lot_size       → fallback legacy
         //   MCX lot sizes are handled on frontend via hardcoded MCX_LOT_SIZES table
-        let query = `SELECT t.*,
+        let query = `SELECT SQL_CALC_FOUND_ROWS t.*,
             u.username, u.full_name,
             uc.username as created_by_name,
             uc.role as created_by_role,
@@ -1892,15 +1917,15 @@ const getTrades = async (req, res) => {
             JOIN users u ON t.user_id = u.id
             LEFT JOIN users uc ON t.created_by = uc.id
             LEFT JOIN script_testing st
-                ON UPPER(t.symbol) COLLATE utf8mb4_unicode_ci = CONCAT('NFO:', UPPER(st.tradingsymbol)) COLLATE utf8mb4_unicode_ci
-                OR UPPER(t.symbol) COLLATE utf8mb4_unicode_ci = UPPER(st.tradingsymbol) COLLATE utf8mb4_unicode_ci
+                ON UPPER(t.symbol) = CONCAT('NFO:', UPPER(st.tradingsymbol))
+                OR UPPER(t.symbol) = UPPER(st.tradingsymbol)
             LEFT JOIN commodity_forex_crypto_lot_sizes cfl
-                ON UPPER(t.symbol) COLLATE utf8mb4_unicode_ci = UPPER(cfl.symbol) COLLATE utf8mb4_unicode_ci
-                OR UPPER(t.symbol) COLLATE utf8mb4_unicode_ci = CONCAT('COMMODITY:', UPPER(cfl.symbol)) COLLATE utf8mb4_unicode_ci
-                OR UPPER(t.symbol) COLLATE utf8mb4_unicode_ci = CONCAT('FOREX:', UPPER(cfl.symbol)) COLLATE utf8mb4_unicode_ci
-                OR UPPER(t.symbol) COLLATE utf8mb4_unicode_ci = CONCAT('CRYPTO:', UPPER(cfl.symbol)) COLLATE utf8mb4_unicode_ci
-                OR REPLACE(REPLACE(REPLACE(REPLACE(UPPER(t.symbol), 'COMMODITY:', ''), 'FOREX:', ''), 'CRYPTO:', ''), '/', '') COLLATE utf8mb4_unicode_ci = REPLACE(UPPER(cfl.symbol), '/', '') COLLATE utf8mb4_unicode_ci
-            LEFT JOIN scrip_data sd ON t.symbol COLLATE utf8mb4_unicode_ci = sd.symbol COLLATE utf8mb4_unicode_ci
+                ON UPPER(t.symbol) = UPPER(cfl.symbol)
+                OR UPPER(t.symbol) = CONCAT('COMMODITY:', UPPER(cfl.symbol))
+                OR UPPER(t.symbol) = CONCAT('FOREX:', UPPER(cfl.symbol))
+                OR UPPER(t.symbol) = CONCAT('CRYPTO:', UPPER(cfl.symbol))
+                OR REPLACE(REPLACE(REPLACE(REPLACE(UPPER(t.symbol), 'COMMODITY:', ''), 'FOREX:', ''), 'CRYPTO:', ''), '/', '') = REPLACE(UPPER(cfl.symbol), '/', '')
+            LEFT JOIN scrip_data sd ON t.symbol = sd.symbol
             WHERE 1=1`;
         const params = [];
 
@@ -2010,7 +2035,28 @@ const getTrades = async (req, res) => {
 
         query += ' ORDER BY t.id DESC';
 
+        // Optional server-side pagination (backward-compatible: no params = old behavior)
+        const page = parseInt(req.query.page, 10) || 1;
+        const limit = parseInt(req.query.limit, 10) || null;
+        if (limit && limit > 0) {
+            const offset = (page - 1) * limit;
+            query += ' LIMIT ? OFFSET ?';
+            params.push(limit, offset);
+        }
+
         const [rows] = await db.execute(query, params);
+
+        // Capture total matching rows for paginated responses (must be on same connection)
+        let totalTradesCount = rows.length;
+        if (limit && limit > 0) {
+            try {
+                const [foundRows] = await db.execute('SELECT FOUND_ROWS() as total');
+                totalTradesCount = parseInt(foundRows[0]?.total, 10) || rows.length;
+            } catch (e) {
+                totalTradesCount = rows.length;
+            }
+        }
+
         const commodityLotService = require('../services/CommodityLotService');
         rows.forEach(trade => {
             const info = commodityLotService.getLotInfo(trade.symbol);
@@ -2209,13 +2255,19 @@ const getTrades = async (req, res) => {
                 }));
 
                 rows.push(...wsiMapped);
+                totalTradesCount += (wsiMapped?.length || 0);
                 rows.sort((a, b) => new Date(b.exit_time || b.entry_time || b.created_at) - new Date(a.exit_time || a.entry_time || a.created_at));
             } catch (wsiErr) {
                 console.error('[getTrades] Error fetching weekly_settlement_items:', wsiErr);
             }
         }
 
-        res.json(rows);
+        // Backward-compatible: return array when no pagination requested
+        if (limit && limit > 0) {
+            res.json({ data: rows, total: totalTradesCount, page, limit });
+        } else {
+            res.json(rows);
+        }
 
 
     } catch (err) {
@@ -2244,15 +2296,15 @@ const getTradeById = async (req, res) => {
              JOIN users u ON t.user_id = u.id
              LEFT JOIN users uc ON t.created_by = uc.id
              LEFT JOIN script_testing st
-                 ON UPPER(t.symbol) COLLATE utf8mb4_unicode_ci = CONCAT('NFO:', UPPER(st.tradingsymbol)) COLLATE utf8mb4_unicode_ci
-                 OR UPPER(t.symbol) COLLATE utf8mb4_unicode_ci = UPPER(st.tradingsymbol) COLLATE utf8mb4_unicode_ci
+                 ON UPPER(t.symbol) = CONCAT('NFO:', UPPER(st.tradingsymbol))
+                 OR UPPER(t.symbol) = UPPER(st.tradingsymbol)
              LEFT JOIN commodity_forex_crypto_lot_sizes cfl
-                 ON UPPER(t.symbol) COLLATE utf8mb4_unicode_ci = UPPER(cfl.symbol) COLLATE utf8mb4_unicode_ci
-                 OR UPPER(t.symbol) COLLATE utf8mb4_unicode_ci = CONCAT('COMMODITY:', UPPER(cfl.symbol)) COLLATE utf8mb4_unicode_ci
-                 OR UPPER(t.symbol) COLLATE utf8mb4_unicode_ci = CONCAT('FOREX:', UPPER(cfl.symbol)) COLLATE utf8mb4_unicode_ci
-                 OR UPPER(t.symbol) COLLATE utf8mb4_unicode_ci = CONCAT('CRYPTO:', UPPER(cfl.symbol)) COLLATE utf8mb4_unicode_ci
-                 OR REPLACE(REPLACE(REPLACE(REPLACE(UPPER(t.symbol), 'COMMODITY:', ''), 'FOREX:', ''), 'CRYPTO:', ''), '/', '') COLLATE utf8mb4_unicode_ci = REPLACE(UPPER(cfl.symbol), '/', '') COLLATE utf8mb4_unicode_ci
-             LEFT JOIN scrip_data sd ON t.symbol COLLATE utf8mb4_unicode_ci = sd.symbol COLLATE utf8mb4_unicode_ci
+                 ON UPPER(t.symbol) = UPPER(cfl.symbol)
+                 OR UPPER(t.symbol) = CONCAT('COMMODITY:', UPPER(cfl.symbol))
+                 OR UPPER(t.symbol) = CONCAT('FOREX:', UPPER(cfl.symbol))
+                 OR UPPER(t.symbol) = CONCAT('CRYPTO:', UPPER(cfl.symbol))
+                 OR REPLACE(REPLACE(REPLACE(REPLACE(UPPER(t.symbol), 'COMMODITY:', ''), 'FOREX:', ''), 'CRYPTO:', ''), '/', '') = REPLACE(UPPER(cfl.symbol), '/', '')
+             LEFT JOIN scrip_data sd ON t.symbol = sd.symbol
              WHERE t.id = ?`,
             [req.params.id]
         );

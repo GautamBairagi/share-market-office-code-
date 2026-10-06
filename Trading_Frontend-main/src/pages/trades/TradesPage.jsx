@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Download, SquarePen, Trash2, X, Eye, ChevronLeft, ChevronRight } from 'lucide-react';
 import { getTrades, deleteTrade } from '../../services/api';
@@ -24,17 +24,42 @@ const TradesPage = ({ onCreateClick, onNavigate }) => {
         userId: '', buyRate: '', sellRate: '', lots: ''
     });
 
+    const scripMap = useMemo(() => {
+        const map = new Map();
+        const add = (s) => {
+            if (!s?.symbol) return;
+            const sym = s.symbol.toUpperCase();
+            if (!map.has(sym)) map.set(sym, s);
+            const clean = sym.includes(':') ? sym.split(':')[1] : sym;
+            if (!map.has(clean)) map.set(clean, s);
+        };
+        (watchlistRows || []).forEach(add);
+        (cryptoData || []).forEach(add);
+        (forexData || []).forEach(add);
+        (commodityData || []).forEach(add);
+        return map;
+    }, [watchlistRows, cryptoData, forexData, commodityData]);
+
     useEffect(() => {
-        fetchTrades();
-        const interval = setInterval(() => fetchTrades(false), 5000);
-        return () => clearInterval(interval);
-    }, []);
+        const timer = setTimeout(() => fetchTrades(false), 400);
+        return () => clearTimeout(timer);
+    }, [currentPage, filters.fromDate, filters.toDate, filters.id, filters.scrip, filters.userId]);
 
     const fetchTrades = async (showLoading = true) => {
         if (showLoading) setLoading(true);
         try {
-            const data = await getTrades({});
-            setTrades(Array.isArray(data) ? data : []);
+            const backendFilters = {
+                fromDate: filters.fromDate,
+                toDate: filters.toDate,
+                id: filters.id,
+                scrip: filters.scrip,
+                username: filters.userId,
+                page: currentPage,
+                limit: 500
+            };
+            const data = await getTrades(backendFilters);
+            const list = Array.isArray(data) ? data : (data?.data || []);
+            setTrades(list);
         } catch (err) {
             console.error('Failed to fetch trades:', err);
         } finally {
@@ -131,14 +156,9 @@ const TradesPage = ({ onCreateClick, onNavigate }) => {
     };
 
     const getSymbolDisplay = (t) => {
-        const allScrips = [...(watchlistRows || []), ...(cryptoData || []), ...(forexData || []), ...(commodityData || [])];
         const tradeSymUpper = (t.symbol || '').toUpperCase();
-        const scrip = allScrips.find(s => {
-            const ds = displaySymbol(s).toUpperCase();
-            const rs = (s.symbol || '').toUpperCase();
-            const ts = rs.split(':').pop();
-            return ds === tradeSymUpper || rs === tradeSymUpper || ts === tradeSymUpper;
-        });
+        const cleanSym = tradeSymUpper.includes(':') ? tradeSymUpper.split(':')[1] : tradeSymUpper;
+        const scrip = scripMap.get(tradeSymUpper) || scripMap.get(cleanSym);
         return scrip ? displaySymbol(scrip) : displaySymbol(t.symbol);
     };
 

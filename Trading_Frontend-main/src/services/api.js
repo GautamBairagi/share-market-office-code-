@@ -445,8 +445,8 @@ export const getWatchlist = async () => {
     return response.data;
 };
 
-export const getLiveM2M = async (userId = null) => {
-    const response = await api.get('/dashboard/live-m2m', { params: { userId } });
+export const getLiveM2M = async (userId = null, days = 7) => {
+    const response = await api.get('/dashboard/live-m2m', { params: { userId, days } });
     return response.data;
 };
 
