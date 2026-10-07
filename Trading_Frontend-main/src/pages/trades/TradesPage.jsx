@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Download, SquarePen, Trash2, X, Eye, ChevronLeft, ChevronRight } from 'lucide-react';
 import { getTrades, deleteTrade } from '../../services/api';
@@ -8,15 +8,52 @@ import { displaySymbol } from '../../utils/marketUtils';
 
 const PAGE_SIZE = 20;
 
+let tradesPageCache = null;
+
+export const clearTradesPageCache = () => {
+    tradesPageCache = null;
+    try { sessionStorage.removeItem('trades_page_cache'); } catch (e) {}
+};
+
+export const setTradesPageCache = (data) => {
+    tradesPageCache = data;
+    try { sessionStorage.setItem('trades_page_cache', JSON.stringify(data)); } catch (e) {}
+};
+
+const getInitialTrades = () => {
+    if (tradesPageCache && Array.isArray(tradesPageCache) && tradesPageCache.length > 0) {
+        return tradesPageCache;
+    }
+    try {
+        const stored = sessionStorage.getItem('trades_page_cache');
+        if (stored) {
+            const parsed = JSON.parse(stored);
+            if (Array.isArray(parsed) && parsed.length > 0) {
+                tradesPageCache = parsed;
+                return parsed;
+            }
+        }
+    } catch (e) {}
+    return [];
+};
+
 const TradesPage = ({ onCreateClick, onNavigate }) => {
     const { user } = useAuth();
     const navigate = useNavigate();
-    const [trades, setTrades] = useState([]);
-    const [loading, setLoading] = useState(true);
+
+    const initialTrades = getInitialTrades();
+    const [trades, setTrades] = useState(initialTrades);
+    const [loading, setLoading] = useState(() => initialTrades.length === 0);
+    const [isRefreshing, setIsRefreshing] = useState(false);
     const [selectedTrades, setSelectedTrades] = useState([]);
     const [deleteModal, setDeleteModal] = useState({ show: false, trade: null });
     const [deleting, setDeleting] = useState(false);
     const [currentPage, setCurrentPage] = useState(1);
+
+    // Sorting state
+    const [sortField, setSortField] = useState('id');
+    const [sortDirection, setSortDirection] = useState('desc');
+
     const { watchlistRows, cryptoData, forexData, commodityData } = useMarketData();
 
     const [filters, setFilters] = useState({
@@ -41,12 +78,17 @@ const TradesPage = ({ onCreateClick, onNavigate }) => {
     }, [watchlistRows, cryptoData, forexData, commodityData]);
 
     useEffect(() => {
-        const timer = setTimeout(() => fetchTrades(false), 400);
+        const timer = setTimeout(() => fetchTrades(false), 300);
         return () => clearTimeout(timer);
-    }, [currentPage, filters.fromDate, filters.toDate, filters.id, filters.scrip, filters.userId]);
+    }, [filters.fromDate, filters.toDate, filters.id, filters.scrip, filters.userId]);
 
-    const fetchTrades = async (showLoading = true) => {
-        if (showLoading) setLoading(true);
+    const fetchTrades = async (showLoading = false) => {
+        if (showLoading && trades.length === 0 && (!tradesPageCache || tradesPageCache.length === 0)) {
+            setLoading(true);
+        } else {
+            setIsRefreshing(true);
+        }
+
         try {
             const backendFilters = {
                 fromDate: filters.fromDate,
@@ -54,49 +96,84 @@ const TradesPage = ({ onCreateClick, onNavigate }) => {
                 id: filters.id,
                 scrip: filters.scrip,
                 username: filters.userId,
-                page: currentPage,
-                limit: 500
+                limit: 1000
             };
             const data = await getTrades(backendFilters);
             const list = Array.isArray(data) ? data : (data?.data || []);
+            setTradesPageCache(list);
             setTrades(list);
         } catch (err) {
             console.error('Failed to fetch trades:', err);
         } finally {
             setLoading(false);
+            setIsRefreshing(false);
         }
     };
 
-    const filteredTrades = trades.filter(t => {
-        if (filters.id && !t.id.toString().includes(filters.id)) return false;
-        if (filters.scrip && !t.symbol?.toLowerCase().includes(filters.scrip.toLowerCase())) return false;
-        if (filters.segment !== 'All') {
-            const symbol = (t.symbol || t.scrip || '').toUpperCase();
-            const marketType = (t.market_type || '').toUpperCase();
-            if (filters.segment === 'MCX') {
-                const mcx = ['GOLD','GOLDM','SILVER','SILVERM','CRUDEOIL','COPPER','NICKEL','ZINC','LEAD','ALUMINIUM','NATURALGAS'];
-                if (!mcx.some(s => symbol.includes(s)) && marketType !== 'MCX') return false;
-            } else if (filters.segment === 'NSE') {
-                const mcxExcl = ['GOLD','GOLDM','SILVER','SILVERM','CRUDEOIL','COPPER','NICKEL','ZINC','LEAD','ALUMINIUM','NATURALGAS'];
-                if (mcxExcl.some(s => symbol.includes(s)) || marketType === 'MCX' || marketType === 'CRYPTO' || marketType === 'FOREX') return false;
-            } else if (filters.segment === 'CRYPTO') {
-                if (marketType !== 'CRYPTO' && !symbol.startsWith('CRYPTO:')) return false;
-            } else if (filters.segment === 'FOREX') {
-                if (marketType !== 'FOREX' && !symbol.startsWith('FOREX:')) return false;
-            }
+    const handleSort = (field) => {
+        if (sortField === field) {
+            setSortDirection(prev => prev === 'asc' ? 'desc' : 'asc');
+        } else {
+            setSortField(field);
+            setSortDirection('asc');
         }
-        if (filters.userId && !(t.username || '').toLowerCase().includes(filters.userId.toLowerCase()) && !t.user_id?.toString().includes(filters.userId)) return false;
-        if (filters.fromDate || filters.toDate) {
-            const tradeDate = new Date(t.entry_time).toISOString().split('T')[0];
-            if (filters.fromDate && tradeDate < filters.fromDate) return false;
-            if (filters.toDate && tradeDate > filters.toDate) return false;
-        }
-        return true;
-    });
+    };
 
-    const totalPages = Math.max(1, Math.ceil(filteredTrades.length / PAGE_SIZE));
+    const filteredTrades = useMemo(() => {
+        return trades.filter(t => {
+            if (filters.id && !t.id.toString().includes(filters.id)) return false;
+            if (filters.scrip && !t.symbol?.toLowerCase().includes(filters.scrip.toLowerCase())) return false;
+            if (filters.segment !== 'All') {
+                const symbol = (t.symbol || t.scrip || '').toUpperCase();
+                const marketType = (t.market_type || '').toUpperCase();
+                if (filters.segment === 'MCX') {
+                    const mcx = ['GOLD','GOLDM','SILVER','SILVERM','CRUDEOIL','COPPER','NICKEL','ZINC','LEAD','ALUMINIUM','NATURALGAS'];
+                    if (!mcx.some(s => symbol.includes(s)) && marketType !== 'MCX') return false;
+                } else if (filters.segment === 'NSE') {
+                    const mcxExcl = ['GOLD','GOLDM','SILVER','SILVERM','CRUDEOIL','COPPER','NICKEL','ZINC','LEAD','ALUMINIUM','NATURALGAS'];
+                    if (mcxExcl.some(s => symbol.includes(s)) || marketType === 'MCX' || marketType === 'CRYPTO' || marketType === 'FOREX') return false;
+                } else if (filters.segment === 'CRYPTO') {
+                    if (marketType !== 'CRYPTO' && !symbol.startsWith('CRYPTO:')) return false;
+                } else if (filters.segment === 'FOREX') {
+                    if (marketType !== 'FOREX' && !symbol.startsWith('FOREX:')) return false;
+                }
+            }
+            if (filters.userId && !(t.username || '').toLowerCase().includes(filters.userId.toLowerCase()) && !t.user_id?.toString().includes(filters.userId)) return false;
+            if (filters.fromDate || filters.toDate) {
+                const tradeDate = new Date(t.entry_time).toISOString().split('T')[0];
+                if (filters.fromDate && tradeDate < filters.fromDate) return false;
+                if (filters.toDate && tradeDate > filters.toDate) return false;
+            }
+            return true;
+        });
+    }, [trades, filters]);
+
+    const sortedTrades = useMemo(() => {
+        let result = [...filteredTrades];
+        if (sortField) {
+            result.sort((a, b) => {
+                let valA = a[sortField] ?? '';
+                let valB = b[sortField] ?? '';
+
+                if (['id', 'qty', 'entry_price', 'exit_price', 'pnl', 'brokerage', 'user_id'].includes(sortField)) {
+                    valA = parseFloat(valA) || 0;
+                    valB = parseFloat(valB) || 0;
+                } else if (typeof valA === 'string') {
+                    valA = valA.toLowerCase();
+                    valB = String(valB).toLowerCase();
+                }
+
+                if (valA < valB) return sortDirection === 'asc' ? -1 : 1;
+                if (valA > valB) return sortDirection === 'asc' ? 1 : -1;
+                return 0;
+            });
+        }
+        return result;
+    }, [filteredTrades, sortField, sortDirection]);
+
+    const totalPages = Math.max(1, Math.ceil(sortedTrades.length / PAGE_SIZE));
     const safePage = Math.min(currentPage, totalPages);
-    const pagedTrades = filteredTrades.slice((safePage - 1) * PAGE_SIZE, safePage * PAGE_SIZE);
+    const pagedTrades = sortedTrades.slice((safePage - 1) * PAGE_SIZE, safePage * PAGE_SIZE);
 
     const handleFilterChange = (e) => {
         const { name, value } = e.target;
@@ -127,11 +204,11 @@ const TradesPage = ({ onCreateClick, onNavigate }) => {
     };
 
     const handleExport = () => {
-        if (filteredTrades.length === 0) return alert('No trades to export');
+        if (sortedTrades.length === 0) return alert('No trades to export');
         const headers = ['ID', 'Scrip', 'Type', 'Username', 'Buy Rate', 'Sell Rate', 'Lots', 'Status', 'Entry Time'];
         const csvContent = [
             headers.join(','),
-            ...filteredTrades.map(t => [
+            ...sortedTrades.map(t => [
                 t.id, t.symbol, t.type, t.username,
                 t.type === 'BUY' ? t.entry_price : (t.exit_price || ''),
                 t.type === 'SELL' ? t.entry_price : (t.exit_price || ''),
@@ -178,7 +255,6 @@ const TradesPage = ({ onCreateClick, onNavigate }) => {
         return t.status;
     };
 
-    // Pagination helper
     const getPaginationPages = () => {
         const pages = [];
         if (totalPages <= 7) {
@@ -200,7 +276,7 @@ const TradesPage = ({ onCreateClick, onNavigate }) => {
             <div className="flex flex-col xl:flex-row justify-between items-stretch xl:items-center gap-4 px-3 sm:px-4 md:px-6 pt-4 flex-wrap">
                 {!user?.isSubBroker && (
                     <button
-                        onClick={onCreateClick || (() => {})}
+                        onClick={onCreateClick || (() => { })}
                         className="text-white font-bold py-3 px-8 rounded uppercase tracking-widest text-[11px] transition-all active:scale-95 w-full sm:w-auto"
                         style={{ background: 'linear-gradient(60deg, #288c6c, #4ea752)', boxShadow: '0 4px 15px rgba(76,175,80,0.35)' }}
                     >
@@ -252,9 +328,13 @@ const TradesPage = ({ onCreateClick, onNavigate }) => {
                     </div>
                 </div>
                 <div className="flex gap-3">
-                    <button className="text-white font-bold py-2 px-8 rounded uppercase tracking-widest text-[11px] transition-all active:scale-95"
-                        style={{ background: 'linear-gradient(60deg, #288c6c, #4ea752)' }}>SEARCH</button>
-                    <button onClick={handleReset} className="bg-[#607d8b] hover:bg-[#546e7a] text-white font-bold py-2 px-8 rounded uppercase tracking-widest text-[11px] transition-all">RESET</button>
+                    <button
+                        onClick={() => fetchTrades()}
+                        className="text-white font-bold py-2 px-8 rounded uppercase tracking-widest text-[11px] transition-all active:scale-95 cursor-pointer"
+                        style={{ background: 'linear-gradient(60deg, #288c6c, #4ea752)' }}>
+                        SEARCH
+                    </button>
+                    <button onClick={handleReset} className="bg-[#607d8b] hover:bg-[#546e7a] text-white font-bold py-2 px-8 rounded uppercase tracking-widest text-[11px] transition-all cursor-pointer">RESET</button>
                 </div>
             </div>
 
@@ -263,8 +343,13 @@ const TradesPage = ({ onCreateClick, onNavigate }) => {
                 {/* Table Header */}
                 <div className="px-5 py-3 bg-[#151d30] border-b border-white/5 flex items-center justify-between rounded-t-lg">
                     <span className="text-slate-400 text-xs">
-                        Showing <b className="text-white">{(safePage - 1) * PAGE_SIZE + 1}–{Math.min(safePage * PAGE_SIZE, filteredTrades.length)}</b> of <b className="text-white">{filteredTrades.length}</b> items
+                        Showing <b className="text-white">{pagedTrades.length ? (safePage - 1) * PAGE_SIZE + 1 : 0}–{Math.min(safePage * PAGE_SIZE, sortedTrades.length)}</b> of <b className="text-white">{sortedTrades.length}</b> items
                     </span>
+                    {isRefreshing && (
+                        <span className="text-xs text-green-400 font-medium flex items-center gap-1.5 animate-pulse">
+                            <span className="w-2 h-2 rounded-full bg-green-400"></span> Updating...
+                        </span>
+                    )}
                     {selectedTrades.length > 0 && (
                         <span className="text-xs text-blue-400 font-semibold">{selectedTrades.length} selected</span>
                     )}
@@ -280,21 +365,48 @@ const TradesPage = ({ onCreateClick, onNavigate }) => {
                                         className="w-4 h-4 rounded accent-[#4CAF50] cursor-pointer" />
                                 </th>
                                 <th className="px-4 py-3.5 font-semibold" style={{ border: '1px solid rgba(255,255,255,0.06)' }}>Actions</th>
-                                <th className="px-4 py-3.5 font-semibold" style={{ border: '1px solid rgba(255,255,255,0.06)' }}>ID ↕</th>
-                                <th className="px-4 py-3.5 font-semibold" style={{ border: '1px solid rgba(255,255,255,0.06)' }}>Status</th>
-                                <th className="px-4 py-3.5 font-semibold" style={{ border: '1px solid rgba(255,255,255,0.06)' }}>Scrip</th>
-                                <th className="px-4 py-3.5 font-semibold" style={{ border: '1px solid rgba(255,255,255,0.06)' }}>Segment</th>
-                                <th className="px-4 py-3.5 font-semibold" style={{ border: '1px solid rgba(255,255,255,0.06)' }}>User ID</th>
-                                <th className="px-4 py-3.5 font-semibold" style={{ border: '1px solid rgba(255,255,255,0.06)' }}>Buy Rate</th>
-                                <th className="px-4 py-3.5 font-semibold" style={{ border: '1px solid rgba(255,255,255,0.06)' }}>Sell Rate</th>
-                                <th className="px-4 py-3.5 font-semibold" style={{ border: '1px solid rgba(255,255,255,0.06)' }}>Lots / Units</th>
-                                <th className="px-4 py-3.5 font-semibold" style={{ border: '1px solid rgba(255,255,255,0.06)' }}>Bought at</th>
-                                <th className="px-4 py-3.5 font-semibold" style={{ border: '1px solid rgba(255,255,255,0.06)' }}>Sold at</th>
+                                <th onClick={() => handleSort('id')} className="px-4 py-3.5 font-semibold cursor-pointer select-none hover:text-green-400 transition-colors" style={{ border: '1px solid rgba(255,255,255,0.06)' }}>
+                                    ID {sortField === 'id' ? (sortDirection === 'asc' ? '↑' : '↓') : '↕'}
+                                </th>
+                                <th onClick={() => handleSort('status')} className="px-4 py-3.5 font-semibold cursor-pointer select-none hover:text-green-400 transition-colors" style={{ border: '1px solid rgba(255,255,255,0.06)' }}>
+                                    Status {sortField === 'status' ? (sortDirection === 'asc' ? '↑' : '↓') : ''}
+                                </th>
+                                <th onClick={() => handleSort('symbol')} className="px-4 py-3.5 font-semibold cursor-pointer select-none hover:text-green-400 transition-colors" style={{ border: '1px solid rgba(255,255,255,0.06)' }}>
+                                    Scrip {sortField === 'symbol' ? (sortDirection === 'asc' ? '↑' : '↓') : ''}
+                                </th>
+                                <th onClick={() => handleSort('market_type')} className="px-4 py-3.5 font-semibold cursor-pointer select-none hover:text-green-400 transition-colors" style={{ border: '1px solid rgba(255,255,255,0.06)' }}>
+                                    Segment {sortField === 'market_type' ? (sortDirection === 'asc' ? '↑' : '↓') : ''}
+                                </th>
+                                <th onClick={() => handleSort('user_id')} className="px-4 py-3.5 font-semibold cursor-pointer select-none hover:text-green-400 transition-colors" style={{ border: '1px solid rgba(255,255,255,0.06)' }}>
+                                    User ID {sortField === 'user_id' ? (sortDirection === 'asc' ? '↑' : '↓') : ''}
+                                </th>
+                                <th onClick={() => handleSort('entry_price')} className="px-4 py-3.5 font-semibold cursor-pointer select-none hover:text-green-400 transition-colors" style={{ border: '1px solid rgba(255,255,255,0.06)' }}>
+                                    Buy Rate {sortField === 'entry_price' ? (sortDirection === 'asc' ? '↑' : '↓') : ''}
+                                </th>
+                                <th onClick={() => handleSort('exit_price')} className="px-4 py-3.5 font-semibold cursor-pointer select-none hover:text-green-400 transition-colors" style={{ border: '1px solid rgba(255,255,255,0.06)' }}>
+                                    Sell Rate {sortField === 'exit_price' ? (sortDirection === 'asc' ? '↑' : '↓') : ''}
+                                </th>
+                                <th onClick={() => handleSort('qty')} className="px-4 py-3.5 font-semibold cursor-pointer select-none hover:text-green-400 transition-colors" style={{ border: '1px solid rgba(255,255,255,0.06)' }}>
+                                    Lots / Units {sortField === 'qty' ? (sortDirection === 'asc' ? '↑' : '↓') : ''}
+                                </th>
+                                <th onClick={() => handleSort('entry_time')} className="px-4 py-3.5 font-semibold cursor-pointer select-none hover:text-green-400 transition-colors" style={{ border: '1px solid rgba(255,255,255,0.06)' }}>
+                                    Bought at {sortField === 'entry_time' ? (sortDirection === 'asc' ? '↑' : '↓') : ''}
+                                </th>
+                                <th onClick={() => handleSort('exit_time')} className="px-4 py-3.5 font-semibold cursor-pointer select-none hover:text-green-400 transition-colors" style={{ border: '1px solid rgba(255,255,255,0.06)' }}>
+                                    Sold at {sortField === 'exit_time' ? (sortDirection === 'asc' ? '↑' : '↓') : ''}
+                                </th>
                             </tr>
                         </thead>
                         <tbody className="text-[13px] text-slate-300">
-                            {loading ? (
-                                <tr><td colSpan="12" className="px-6 py-12 text-center text-slate-500 italic" style={{ border: '1px solid rgba(255,255,255,0.06)' }}>Loading trades...</td></tr>
+                            {loading && trades.length === 0 ? (
+                                <tr>
+                                    <td colSpan="12" className="px-6 py-12 text-center text-slate-400 italic" style={{ border: '1px solid rgba(255,255,255,0.06)' }}>
+                                        <div className="flex flex-col items-center justify-center gap-2">
+                                            <div className="w-6 h-6 border-2 border-green-500 border-t-transparent rounded-full animate-spin"></div>
+                                            <span className="text-xs text-slate-400">Loading trades...</span>
+                                        </div>
+                                    </td>
+                                </tr>
                             ) : pagedTrades.length > 0 ? pagedTrades.map((t) => {
                                 const isOpen = t.status === 'OPEN' && !t.is_pending;
                                 const isClosed = t.status === 'CLOSED';
@@ -369,7 +481,7 @@ const TradesPage = ({ onCreateClick, onNavigate }) => {
                                     </tr>
                                 );
                             }) : (
-                                <tr><td colSpan="11" className="px-6 py-12 text-center text-slate-500 italic" style={{ border: '1px solid rgba(255,255,255,0.06)' }}>No trades found.</td></tr>
+                                <tr><td colSpan="12" className="px-6 py-12 text-center text-slate-500 italic" style={{ border: '1px solid rgba(255,255,255,0.06)' }}>No trades found.</td></tr>
                             )}
                         </tbody>
                     </table>
@@ -395,11 +507,10 @@ const TradesPage = ({ onCreateClick, onNavigate }) => {
                                 <button
                                     key={page}
                                     onClick={() => setCurrentPage(page)}
-                                    className={`w-8 h-8 flex items-center justify-center rounded text-xs font-bold transition-all ${
-                                        safePage === page
-                                            ? 'bg-[#4CAF50] text-white shadow-lg shadow-green-900/30'
-                                            : 'bg-white/5 hover:bg-white/10 text-slate-400 hover:text-white'
-                                    }`}
+                                    className={`w-8 h-8 flex items-center justify-center rounded text-xs font-bold transition-all ${safePage === page
+                                        ? 'bg-[#4CAF50] text-white shadow-lg shadow-green-900/30'
+                                        : 'bg-white/5 hover:bg-white/10 text-slate-400 hover:text-white'
+                                        }`}
                                 >
                                     {page}
                                 </button>
