@@ -57,7 +57,7 @@ const SETTINGS_SECTIONS = [
         items: [
             { id: 'action-ledger', icon: FileText, label: 'Action Ledger', desc: 'Audit trail of all admin actions' },
             { id: 'ip-logins', icon: Globe, label: 'IP Login Monitor', desc: 'Track login locations by IP' },
-            { id: 'scrip-data', icon: Database, label: 'Scrip Data', desc: 'Manage exchange script data' },
+            { id: 'script-data', icon: Database, label: 'Script Data', desc: 'Manage exchange script data' },
         ],
     },
     {

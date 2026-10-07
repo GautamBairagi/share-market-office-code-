@@ -41,7 +41,6 @@ import DepositRequestsPage from './pages/requests/DepositRequestsPage';
 import WithdrawalRequestsPage from './pages/requests/WithdrawalRequestsPage';
 import NegativeBalanceTxnsPage from './pages/transactions/NegativeBalanceTxnsPage';
 import PendingOrdersPage from './pages/orders/PendingOrdersPage';
-import ScripDataPage from './pages/data/ScripDataPage';
 import UsersPage from './pages/users/UsersPage';
 import CreateFundForm from './components/CreateFundForm';
 import AddBrokerForm from './components/AddBrokerForm';
@@ -464,7 +463,7 @@ function App() {
                     <Route path="/negative-balance" element={<ProtectedRoute viewId="negative-balance"><NegativeBalanceTxnsPage /></ProtectedRoute>} />
 
                     <Route path="/pending-orders/*" element={<ProtectedRoute viewId="pending-orders"><PendingOrdersPage /></ProtectedRoute>} />
-                    <Route path="/scrip-data" element={<ProtectedRoute viewId="scrip-data"><ScripDataPage /></ProtectedRoute>} />
+                    <Route path="/scrip-data" element={<Navigate to="/script-data" replace />} />
                     <Route path="/group-trades" element={<ProtectedRoute viewId="group-trades"><GroupTradesPage /></ProtectedRoute>} />
                     <Route path="/global-updation" element={<ProtectedRoute viewId="global-updation"><GlobalUpdationPage /></ProtectedRoute>} />
                     <Route path="/theme-settings" element={<ProtectedRoute viewId="theme-settings"><ThemeSettingsPage /></ProtectedRoute>} />
