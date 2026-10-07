@@ -17,7 +17,7 @@ const fetchSchemaInfoOnce = async () => {
             `SELECT TABLE_NAME, COLUMN_NAME FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE()`
         );
         existingColumns = new Set(columnsInfo.map(row => `${row.TABLE_NAME.toLowerCase()}.${row.COLUMN_NAME.toLowerCase()}`));
-        
+
         const [indexesInfo] = await db.execute(
             `SELECT TABLE_NAME, INDEX_NAME FROM information_schema.STATISTICS WHERE TABLE_SCHEMA = DATABASE()`
         );
@@ -256,7 +256,7 @@ const runMigrations = async () => {
     await addColumn('trades', 'trade_type', "VARCHAR(50) DEFAULT 'INTRADAY' AFTER created_by");
     await addColumn('trades', 'margin_type', "VARCHAR(50) DEFAULT 'PER_LOT_BASIS' AFTER trade_type");
     await addColumn('trades', 'close_ip', "VARCHAR(45) DEFAULT NULL");
-    
+
     // Add carry forward & settlement tracking columns to trades
     try { await db.execute("ALTER TABLE trades MODIFY COLUMN status ENUM('OPEN','CLOSED','HOLD','SETTLED','CANCELLED','DELETED') NOT NULL DEFAULT 'OPEN'"); } catch (_) { }
     await addColumn('trades', 'is_carried_forward', 'TINYINT(1) DEFAULT 0');
@@ -573,7 +573,7 @@ const runMigrations = async () => {
 
     // Add contract_mode column
     await addColumn('expiry_rules', 'contract_mode', "VARCHAR(20) DEFAULT 'MANUAL'");
-    
+
     // Add Weekly Settlement Configuration columns (Configurable by SuperAdmin)
     await addColumn('expiry_rules', 'weekly_settlement_day', "VARCHAR(50) DEFAULT 'Sunday'");
     await addColumn('expiry_rules', 'weekly_settlement_time', "VARCHAR(50) DEFAULT '12:00'");
@@ -1280,20 +1280,20 @@ const runMigrations = async () => {
             console.log('🕐 Running one-time UTC → IST timestamp migration (+330 minutes)...');
 
             const tablesToMigrate = [
-                { table: 'trades',              cols: ['entry_time', 'exit_time'] },
+                { table: 'trades', cols: ['entry_time', 'exit_time'] },
                 { table: 'scrip_ticks_history', cols: ['exchange_time', 'system_time', 'created_at'] },
-                { table: 'notifications',       cols: ['created_at'] },
-                { table: 'ip_logins',           cols: ['timestamp'] },
-                { table: 'ip_logs',             cols: ['timestamp'] },
-                { table: 'ledger',              cols: ['created_at'] },
-                { table: 'payment_requests',    cols: ['created_at'] },
-                { table: 'action_ledger',       cols: ['timestamp'] },
-                { table: 'voice_recordings',    cols: ['created_at'] },
-                { table: 'alerts',              cols: ['triggered_at', 'created_at'] },
-                { table: 'support_tickets',     cols: ['created_at'] },
-                { table: 'ticket_messages',     cols: ['created_at'] },
-                { table: 'weekly_balances',     cols: ['created_at'] },
-                { table: 'internal_transfers',  cols: ['created_at'] },
+                { table: 'notifications', cols: ['created_at'] },
+                { table: 'ip_logins', cols: ['timestamp'] },
+                { table: 'ip_logs', cols: ['timestamp'] },
+                { table: 'ledger', cols: ['created_at'] },
+                { table: 'payment_requests', cols: ['created_at'] },
+                { table: 'action_ledger', cols: ['timestamp'] },
+                { table: 'voice_recordings', cols: ['created_at'] },
+                { table: 'alerts', cols: ['triggered_at', 'created_at'] },
+                { table: 'support_tickets', cols: ['created_at'] },
+                { table: 'ticket_messages', cols: ['created_at'] },
+                { table: 'weekly_balances', cols: ['created_at'] },
+                { table: 'internal_transfers', cols: ['created_at'] },
             ];
 
             for (const { table, cols } of tablesToMigrate) {
