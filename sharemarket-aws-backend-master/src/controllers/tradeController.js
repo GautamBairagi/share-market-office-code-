@@ -1897,36 +1897,21 @@ const getTrades = async (req, res) => {
     const { status } = req.query; // OPEN, CLOSED, DELETED, CANCELLED
     const targetUserId = req.query.user_id || req.query.userId || req.query.clientId;
     try {
-        // lot_size priority:
-        //   1. trades.lot_size_at_entry  → saved at trade creation (most accurate)
-        //   2. script_testing.lot_size   → NFO FUT/OPT live from Zerodha API
-        //   3. commodity_forex_crypto_lot_sizes.lot_size → COMEX / FOREX / CRYPTO
-        //   4. scrip_data.lot_size       → fallback legacy
-        //   MCX lot sizes are handled on frontend via hardcoded MCX_LOT_SIZES table
-        let query = `SELECT SQL_CALC_FOUND_ROWS t.*,
+        // ── OPTIMISED QUERY: removed 3 non-indexed LEFT JOINs ──
+        // script_testing, commodity_forex_crypto_lot_sizes, scrip_data all used
+        // UPPER()/REPLACE()/COLLATE on every row → full-table function scans = timeouts.
+        // lot_size is resolved after the query via commodityLotService (already done below).
+        // trades.lot_size_at_entry is saved at trade creation and is sufficient for display.
+        let query = `SELECT t.*,
             u.username, u.full_name,
             uc.username as created_by_name,
             uc.role as created_by_role,
-            COALESCE(
-                t.lot_size_at_entry,
-                st.lot_size,
-                cfl.lot_size,
-                sd.lot_size
-            ) AS lot_size
+            t.lot_size_at_entry AS lot_size
             FROM trades t
             JOIN users u ON t.user_id = u.id
             LEFT JOIN users uc ON t.created_by = uc.id
-            LEFT JOIN script_testing st
-                ON UPPER(t.symbol) = CONCAT('NFO:', UPPER(st.tradingsymbol))
-                OR UPPER(t.symbol) = UPPER(st.tradingsymbol)
-            LEFT JOIN commodity_forex_crypto_lot_sizes cfl
-                ON UPPER(t.symbol) COLLATE utf8mb4_unicode_ci = UPPER(cfl.symbol) COLLATE utf8mb4_unicode_ci
-                OR UPPER(t.symbol) COLLATE utf8mb4_unicode_ci = CONCAT('COMMODITY:', UPPER(cfl.symbol)) COLLATE utf8mb4_unicode_ci
-                OR UPPER(t.symbol) COLLATE utf8mb4_unicode_ci = CONCAT('FOREX:', UPPER(cfl.symbol)) COLLATE utf8mb4_unicode_ci
-                OR UPPER(t.symbol) COLLATE utf8mb4_unicode_ci = CONCAT('CRYPTO:', UPPER(cfl.symbol)) COLLATE utf8mb4_unicode_ci
-                OR REPLACE(REPLACE(REPLACE(REPLACE(UPPER(t.symbol), 'COMMODITY:', ''), 'FOREX:', ''), 'CRYPTO:', ''), '/', '') COLLATE utf8mb4_unicode_ci = REPLACE(UPPER(cfl.symbol), '/', '') COLLATE utf8mb4_unicode_ci
-            LEFT JOIN scrip_data sd ON t.symbol = sd.symbol
             WHERE 1=1`;
+
         const params = [];
 
         if (status) {
@@ -2046,16 +2031,9 @@ const getTrades = async (req, res) => {
 
         const [rows] = await db.execute(query, params);
 
-        // Capture total matching rows for paginated responses (must be on same connection)
-        let totalTradesCount = rows.length;
-        if (limit && limit > 0) {
-            try {
-                const [foundRows] = await db.execute('SELECT FOUND_ROWS() as total');
-                totalTradesCount = parseInt(foundRows[0]?.total, 10) || rows.length;
-            } catch (e) {
-                totalTradesCount = rows.length;
-            }
-        }
+        // Total count for paginated responses
+        const totalTradesCount = rows.length;
+
 
         const commodityLotService = require('../services/CommodityLotService');
         rows.forEach(trade => {
