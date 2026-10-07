@@ -28,6 +28,7 @@ const ClosedPositionsPage = () => {
         fetchClosedTrades();
     }, []);
 
+    
     useEffect(() => {
         const queryParams = new URLSearchParams(location.search);
         const symbolParam = queryParams.get('symbol');

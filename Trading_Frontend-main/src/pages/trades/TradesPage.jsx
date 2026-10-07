@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Download, SquarePen, Trash2, X, Eye, ChevronLeft, ChevronRight } from 'lucide-react';
 import { getTrades, deleteTrade } from '../../services/api';
@@ -395,8 +395,8 @@ const TradesPage = ({ onCreateClick, onNavigate }) => {
                                     key={page}
                                     onClick={() => setCurrentPage(page)}
                                     className={`w-8 h-8 flex items-center justify-center rounded text-xs font-bold transition-all ${safePage === page
-                                            ? 'bg-[#4CAF50] text-white shadow-lg shadow-green-900/30'
-                                            : 'bg-white/5 hover:bg-white/10 text-slate-400 hover:text-white'
+                                        ? 'bg-[#4CAF50] text-white shadow-lg shadow-green-900/30'
+                                        : 'bg-white/5 hover:bg-white/10 text-slate-400 hover:text-white'
                                         }`}
                                 >
                                     {page}
