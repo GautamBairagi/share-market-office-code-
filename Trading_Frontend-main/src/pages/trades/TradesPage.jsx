@@ -74,10 +74,10 @@ const TradesPage = ({ onCreateClick, onNavigate }) => {
             const symbol = (t.symbol || t.scrip || '').toUpperCase();
             const marketType = (t.market_type || '').toUpperCase();
             if (filters.segment === 'MCX') {
-                const mcx = ['GOLD','GOLDM','SILVER','SILVERM','CRUDEOIL','COPPER','NICKEL','ZINC','LEAD','ALUMINIUM','NATURALGAS'];
+                const mcx = ['GOLD', 'GOLDM', 'SILVER', 'SILVERM', 'CRUDEOIL', 'COPPER', 'NICKEL', 'ZINC', 'LEAD', 'ALUMINIUM', 'NATURALGAS'];
                 if (!mcx.some(s => symbol.includes(s)) && marketType !== 'MCX') return false;
             } else if (filters.segment === 'NSE') {
-                const mcxExcl = ['GOLD','GOLDM','SILVER','SILVERM','CRUDEOIL','COPPER','NICKEL','ZINC','LEAD','ALUMINIUM','NATURALGAS'];
+                const mcxExcl = ['GOLD', 'GOLDM', 'SILVER', 'SILVERM', 'CRUDEOIL', 'COPPER', 'NICKEL', 'ZINC', 'LEAD', 'ALUMINIUM', 'NATURALGAS'];
                 if (mcxExcl.some(s => symbol.includes(s)) || marketType === 'MCX' || marketType === 'CRYPTO' || marketType === 'FOREX') return false;
             } else if (filters.segment === 'CRYPTO') {
                 if (marketType !== 'CRYPTO' && !symbol.startsWith('CRYPTO:')) return false;
@@ -200,7 +200,7 @@ const TradesPage = ({ onCreateClick, onNavigate }) => {
             <div className="flex flex-col xl:flex-row justify-between items-stretch xl:items-center gap-4 px-3 sm:px-4 md:px-6 pt-4 flex-wrap">
                 {!user?.isSubBroker && (
                     <button
-                        onClick={onCreateClick || (() => {})}
+                        onClick={onCreateClick || (() => { })}
                         className="text-white font-bold py-3 px-8 rounded uppercase tracking-widest text-[11px] transition-all active:scale-95 w-full sm:w-auto"
                         style={{ background: 'linear-gradient(60deg, #288c6c, #4ea752)', boxShadow: '0 4px 15px rgba(76,175,80,0.35)' }}
                     >
@@ -395,11 +395,10 @@ const TradesPage = ({ onCreateClick, onNavigate }) => {
                                 <button
                                     key={page}
                                     onClick={() => setCurrentPage(page)}
-                                    className={`w-8 h-8 flex items-center justify-center rounded text-xs font-bold transition-all ${
-                                        safePage === page
+                                    className={`w-8 h-8 flex items-center justify-center rounded text-xs font-bold transition-all ${safePage === page
                                             ? 'bg-[#4CAF50] text-white shadow-lg shadow-green-900/30'
                                             : 'bg-white/5 hover:bg-white/10 text-slate-400 hover:text-white'
-                                    }`}
+                                        }`}
                                 >
                                     {page}
                                 </button>
