@@ -43,7 +43,7 @@ const TradesPage = ({ onCreateClick, onNavigate }) => {
     useEffect(() => {
         const timer = setTimeout(() => fetchTrades(false), 400);
         return () => clearTimeout(timer);
-    }, [currentPage, filters.fromDate, filters.toDate, filters.id, filters.scrip, filters.userId]);
+    }, [filters.fromDate, filters.toDate, filters.id, filters.scrip, filters.userId]);
 
     const fetchTrades = async (showLoading = true) => {
         if (showLoading) setLoading(true);
@@ -54,8 +54,7 @@ const TradesPage = ({ onCreateClick, onNavigate }) => {
                 id: filters.id,
                 scrip: filters.scrip,
                 username: filters.userId,
-                page: currentPage,
-                limit: 500
+                limit: 1000
             };
             const data = await getTrades(backendFilters);
             const list = Array.isArray(data) ? data : (data?.data || []);
