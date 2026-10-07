@@ -244,8 +244,10 @@ function App() {
         // So the page mounts with cache already ready — no loading spinner
         if (redirectTo === 'trading-clients') {
             try {
-                const data = await api.getClients({ role: 'TRADER' });
-                setTradingClientsCache(Array.isArray(data) ? data : []);
+                const data = await api.getClients({ role: 'TRADER', page: 1, limit: 50, paginate: 'true' });
+                const list = data?.users || (Array.isArray(data) ? data : []);
+                const total = data?.total !== undefined ? data.total : list.length;
+                setTradingClientsCache(list, total);
             } catch (err) {
                 // If prefetch fails, clear cache so page fetches fresh on mount
                 clearTradingClientsCache();

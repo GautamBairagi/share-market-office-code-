@@ -7,15 +7,40 @@ import Toast from '../../components/common/Toast';
 import * as XLSX from 'xlsx';
 
 let tradingClientsCache = null;
+let tradingClientsTotalCache = null;
 
 export const clearTradingClientsCache = () => {
     tradingClientsCache = null;
-    try { sessionStorage.removeItem('tc_clients_cache'); } catch (e) { }
+    tradingClientsTotalCache = null;
+    try {
+        sessionStorage.removeItem('tc_clients_cache');
+        sessionStorage.removeItem('tc_clients_total');
+        localStorage.removeItem('tc_clients_cache');
+        localStorage.removeItem('tc_clients_total');
+    } catch (e) { }
 };
 
-export const setTradingClientsCache = (data) => {
+export const setTradingClientsCache = (data, total = null) => {
+    if (data && !Array.isArray(data) && Array.isArray(data.users)) {
+        if (total === null || total === undefined) total = data.total;
+        data = data.users;
+    }
     tradingClientsCache = data;
-    try { sessionStorage.setItem('tc_clients_cache', JSON.stringify(data)); } catch (e) { }
+    if (total !== null && total !== undefined && !isNaN(Number(total))) {
+        tradingClientsTotalCache = Number(total);
+    }
+    try {
+        if (data) {
+            const dataStr = JSON.stringify(data);
+            sessionStorage.setItem('tc_clients_cache', dataStr);
+            localStorage.setItem('tc_clients_cache', dataStr);
+        }
+        if (total !== null && total !== undefined && !isNaN(Number(total))) {
+            const totalStr = String(total);
+            sessionStorage.setItem('tc_clients_total', totalStr);
+            localStorage.setItem('tc_clients_total', totalStr);
+        }
+    } catch (e) { }
 };
 
 const getInitialClients = () => {
@@ -23,7 +48,7 @@ const getInitialClients = () => {
         return tradingClientsCache;
     }
     try {
-        const stored = sessionStorage.getItem('tc_clients_cache');
+        const stored = sessionStorage.getItem('tc_clients_cache') || localStorage.getItem('tc_clients_cache');
         if (stored) {
             const parsed = JSON.parse(stored);
             if (Array.isArray(parsed) && parsed.length > 0) {
@@ -35,13 +60,31 @@ const getInitialClients = () => {
     return [];
 };
 
+const getInitialTotalClients = () => {
+    if (typeof tradingClientsTotalCache === 'number' && tradingClientsTotalCache > 0) {
+        return tradingClientsTotalCache;
+    }
+    try {
+        const stored = sessionStorage.getItem('tc_clients_total') || localStorage.getItem('tc_clients_total');
+        if (stored) {
+            const num = parseInt(stored, 10);
+            if (!isNaN(num) && num > 0) {
+                tradingClientsTotalCache = num;
+                return num;
+            }
+        }
+    } catch (e) { }
+    return 0;
+};
+
 const TradingClientsPage = ({ onDepositClick, onWithdrawClick, onLogout, onNavigate }) => {
     const { isSuperAdmin, isAdmin, isBroker, user } = useAuth();
     const { permissions } = useBrokerPermissions(user?.userId, user?.role);
 
     const initialClients = getInitialClients();
+    const initialTotal = getInitialTotalClients();
     const [clients, setClients] = useState(initialClients);
-    const [totalClients, setTotalClients] = useState(0);
+    const [totalClients, setTotalClients] = useState(initialTotal);
     const [itemsPerPage, setItemsPerPage] = useState(50);
     const [loading, setLoading] = useState(() => initialClients.length === 0);
     const [isRefreshing, setIsRefreshing] = useState(false);
@@ -75,7 +118,7 @@ const TradingClientsPage = ({ onDepositClick, onWithdrawClick, onLogout, onNavig
 
         if (showLoading && clients.length === 0 && (!tradingClientsCache || tradingClientsCache.length === 0)) {
             setLoading(true);
-        } else {
+        } else if (pageToFetch !== 1 || searchTerm || statusFilter || fromDate || toDate || clients.length === 0 || totalClients === 0) {
             setIsRefreshing(true);
         }
 
@@ -97,9 +140,15 @@ const TradingClientsPage = ({ onDepositClick, onWithdrawClick, onLogout, onNavig
             const list = data?.users || (Array.isArray(data) ? data : []);
             const total = data?.total !== undefined ? data.total : (totalClients || list.length);
 
-            // Save to fast cache
+            // Save to fast in-memory page cache
             pageCacheRef.current[cacheKey] = { users: list, total };
-            setTradingClientsCache(list);
+
+            // Save to persistent cache when on default initial view
+            const isDefaultView = !searchTerm && !statusFilter && !fromDate && !toDate && pageToFetch === 1;
+            if (isDefaultView) {
+                setTradingClientsCache(list, total);
+            }
+
             setClients(list);
             setTotalClients(total);
 
@@ -377,7 +426,7 @@ const TradingClientsPage = ({ onDepositClick, onWithdrawClick, onLogout, onNavig
                         <div className="px-3 sm:px-6 py-3 sm:py-4 bg-[#1a2035] border-b border-white/5 flex items-center justify-between flex-wrap gap-2">
                             <div className="flex items-center gap-3 flex-wrap">
                                 <span className="text-slate-400 text-xs sm:text-sm font-medium">
-                                    Showing <b className="text-white">{clients.length ? (currentPage - 1) * itemsPerPage + 1 : 0}</b> to <b className="text-white">{Math.min(currentPage * itemsPerPage, totalClients || clients.length)}</b> of <b className="text-white">{(totalClients || clients.length).toLocaleString()}</b> items. (Total in Database: {(totalClients || clients.length).toLocaleString()})
+                                    Showing <b className="text-white">{clients.length ? (currentPage - 1) * itemsPerPage + 1 : 0}</b> to <b className="text-white">{Math.min(currentPage * itemsPerPage, totalClients > 0 ? totalClients : clients.length)}</b> of <b className="text-white">{totalClients > 0 ? totalClients.toLocaleString() : (loading ? '...' : clients.length.toLocaleString())}</b> items. (Total: {totalClients > 0 ? totalClients.toLocaleString() : (loading ? '...' : clients.length.toLocaleString())})
                                 </span>
                                 {/* <div className="flex items-center gap-1.5 ml-2">
                                 <span className="text-xs text-slate-500 font-medium">Rows:</span>

@@ -36,7 +36,7 @@ const getUsers = async (req, res) => {
         }
 
         // Cache key with pagination and search
-        const cacheKey = `users_${currentUserId}_${role || 'all'}_${adminId || 'all'}_${fromDate || 'all'}_${toDate || 'all'}_${search || 'all'}_${parsedPage}_${effectiveLimit}`;
+        const cacheKey = `users_${currentUserId}_${role || 'all'}_${req.query.status || 'all'}_${adminId || 'all'}_${fromDate || 'all'}_${toDate || 'all'}_${search || 'all'}_${parsedPage}_${effectiveLimit}`;
         try {
             const cachedData = await getFromCache(cacheKey);
             if (cachedData) {
@@ -128,7 +128,9 @@ const getUsers = async (req, res) => {
         }
 
         // Total count query for accurate pagination count
-        const countQuery = `SELECT COUNT(*) as total FROM users u LEFT JOIN client_settings cs ON u.id = cs.user_id ${whereClause}`;
+        const countQuery = whereClause.includes('cs.')
+            ? `SELECT COUNT(*) as total FROM users u LEFT JOIN client_settings cs ON u.id = cs.user_id ${whereClause}`
+            : `SELECT COUNT(*) as total FROM users u ${whereClause}`;
         const [countRows] = await db.execute(countQuery, params);
         const totalRecords = countRows[0]?.total || 0;
 
