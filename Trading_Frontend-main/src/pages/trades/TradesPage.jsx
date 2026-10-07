@@ -495,19 +495,19 @@ const TradesPage = ({ onCreateClick, onNavigate }) => {
                         <button
                             onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
                             disabled={safePage === 1}
-                            className="w-8 h-8 flex items-center justify-center rounded bg-white/5 hover:bg-white/10 text-slate-400 hover:text-white disabled:opacity-30 disabled:cursor-not-allowed transition-all"
+                            className="w-8 h-8 flex items-center justify-center rounded bg-white/5 hover:bg-white/10 text-slate-400 hover:text-white disabled:opacity-30 disabled:cursor-not-allowed transition-all cursor-pointer"
                         >
                             <ChevronLeft className="w-4 h-4" />
                         </button>
 
                         {getPaginationPages().map((page, idx) =>
                             page === '...' ? (
-                                <span key={`ellipsis-${idx}`} className="w-8 h-8 flex items-center justify-center text-slate-500 text-xs">…</span>
+                                <span key={`ellipsis-${idx}`} className="min-w-[24px] h-8 flex items-center justify-center text-slate-500 text-xs px-1 select-none">…</span>
                             ) : (
                                 <button
                                     key={page}
                                     onClick={() => setCurrentPage(page)}
-                                    className={`w-8 h-8 flex items-center justify-center rounded text-xs font-bold transition-all ${safePage === page
+                                    className={`min-w-[32px] h-8 px-2 flex items-center justify-center rounded text-xs font-bold transition-all cursor-pointer ${safePage === page
                                         ? 'bg-[#4CAF50] text-white shadow-lg shadow-green-900/30'
                                         : 'bg-white/5 hover:bg-white/10 text-slate-400 hover:text-white'
                                         }`}
@@ -521,7 +521,7 @@ const TradesPage = ({ onCreateClick, onNavigate }) => {
                         <button
                             onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))}
                             disabled={safePage === totalPages}
-                            className="w-8 h-8 flex items-center justify-center rounded bg-white/5 hover:bg-white/10 text-slate-400 hover:text-white disabled:opacity-30 disabled:cursor-not-allowed transition-all"
+                            className="w-8 h-8 flex items-center justify-center rounded bg-white/5 hover:bg-white/10 text-slate-400 hover:text-white disabled:opacity-30 disabled:cursor-not-allowed transition-all cursor-pointer"
                         >
                             <ChevronRight className="w-4 h-4" />
                         </button>

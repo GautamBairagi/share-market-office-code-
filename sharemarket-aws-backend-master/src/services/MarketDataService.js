@@ -42,11 +42,6 @@ class MarketDataService extends EventEmitter {
         this.broadcastInterval = 150; // ms
         this.broadcastTimer = null;
 
-        // Scrip Tick Logging Buffer (Strictly Real Live Market Ticks)
-        this.tickBuffer = [];
-        this.lastSavedTick = {}; // deduplication cache per symbol
-        this.lastTickFlush = Date.now();
-
         this._startBroadcastLoop();
     }
 
@@ -155,54 +150,9 @@ class MarketDataService extends EventEmitter {
                     if (ltp > 0) {
                         const cleanSymbol = sym.includes(':') ? sym.split(':')[1] : sym;
                         alertMonitor.checkAlerts(cleanSymbol, ltp);
-
-                        // Smart deduplication: only log real price fluctuations
-                        const bid = parseFloat(priceData.bid || priceData.buy || ltp);
-                        const ask = parseFloat(priceData.ask || priceData.sell || ltp);
-                        const last = this.lastSavedTick[cleanSymbol];
-                        const hasPriceChanged = !last || last.ltp !== ltp || last.bid !== bid || last.ask !== ask;
-
-                        if (hasPriceChanged) {
-                            this.lastSavedTick[cleanSymbol] = { ltp, bid, ask };
-
-                            // Queue for DB Tick History Logging
-                            this.tickBuffer.push([
-                                cleanSymbol,
-                                now,
-                                now,
-                                bid,
-                                ask,
-                                parseFloat(priceData.high || ltp),
-                                parseFloat(priceData.low || ltp),
-                                parseFloat(ltp),
-                                priceData.market_type || priceData.segment || null
-                            ]);
-                        }
                     }
                 }
             });
-
-            // Flush Tick Buffer to Database asynchronously so it does not block the broadcast
-            if (this.tickBuffer.length > 0 && (Date.now() - this.lastTickFlush > 3000 || this.tickBuffer.length >= 3000)) {
-                this.lastTickFlush = Date.now();
-
-                setImmediate(async () => {
-                    const db = require('../config/db');
-                    // Dynamic full-chunk splicing: guarantee zero RAM leak regardless of tick volume
-                    while (this.tickBuffer.length > 0) {
-                        const batchToInsert = this.tickBuffer.splice(0, 3000);
-                        try {
-                            await db.query(`
-                                INSERT INTO scrip_ticks_history 
-                                (scrip_id, exchange_time, system_time, bid, ask, high, low, ltp, market_type) 
-                                VALUES ?
-                            `, [batchToInsert]);
-                        } catch (err) {
-                            // Ignore transient tick insert errors to avoid flooding console
-                        }
-                    }
-                });
-            }
 
             const io = socketManager.getIo();
             if (io) {
