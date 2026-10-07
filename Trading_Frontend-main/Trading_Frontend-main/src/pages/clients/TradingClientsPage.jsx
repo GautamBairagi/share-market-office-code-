@@ -18,6 +18,7 @@ const TradingClientsPage = ({ onDepositClick, onWithdrawClick, onLogout, onNavig
     const [statusFilter, setStatusFilter] = useState('');
     const [fromDate, setFromDate] = useState('');
     const [toDate, setToDate] = useState('');
+    const [currentPage, setCurrentPage] = useState(1);
     const [toast, setToast] = useState({ message: '', type: 'success' });
     const [deleteConfirm, setDeleteConfirm] = useState(null); // holds client to be deleted
 
@@ -65,6 +66,10 @@ const TradingClientsPage = ({ onDepositClick, onWithdrawClick, onLogout, onNavig
         return () => el.removeEventListener('scroll', handleScroll);
     }, [loading]);
 
+    useEffect(() => {
+        setCurrentPage(1);
+    }, [searchTerm, statusFilter, fromDate, toDate]);
+
     const filteredClients = clients.filter(client => {
         const username = client.username || '';
         const fullName = client.full_name || '';
@@ -86,6 +91,10 @@ const TradingClientsPage = ({ onDepositClick, onWithdrawClick, onLogout, onNavig
 
         return matchesSearch && matchesStatus && matchesDate;
     });
+
+    const itemsPerPage = 50;
+    const totalPages = Math.ceil(filteredClients.length / itemsPerPage);
+    const paginatedClients = filteredClients.slice((currentPage - 1) * itemsPerPage, currentPage * itemsPerPage);
 
     const toggleStatus = async (userId, currentStatus) => {
         const newStatus = currentStatus === 'Active' ? 'Inactive' : 'Active';
@@ -222,7 +231,7 @@ const TradingClientsPage = ({ onDepositClick, onWithdrawClick, onLogout, onNavig
                             SEARCH
                         </button>
                         <button 
-                            onClick={() => { setSearchTerm(''); setStatusFilter(''); setFromDate(''); setToDate(''); fetchClients(); }} 
+                            onClick={() => { setSearchTerm(''); setStatusFilter(''); setFromDate(''); setToDate(''); setCurrentPage(1); fetchClients(); }} 
                             className="bg-[#808080] hover:bg-[#707070] text-white px-6 py-2.5 rounded font-bold text-xs tracking-widest flex items-center justify-center gap-2 shadow-lg transition-all uppercase flex-1 sm:flex-none cursor-pointer"
                         >
                             <RotateCcw className="w-4 h-4" /> RESET
@@ -279,7 +288,7 @@ const TradingClientsPage = ({ onDepositClick, onWithdrawClick, onLogout, onNavig
                 {/* Table Container */}
                 <div className="bg-[#1f283e] overflow-hidden rounded-lg border border-white/5 shadow-2xl">
                     <div className="px-3 sm:px-6 py-3 sm:py-4 bg-[#1a2035] border-b border-white/5 flex items-center justify-between flex-wrap gap-2">
-                        <span className="text-slate-400 text-xs sm:text-sm font-medium">Showing <b className="text-white">{filteredClients.length}</b> of <b className="text-white">{clients.length}</b> items.</span>
+                        <span className="text-slate-400 text-xs sm:text-sm font-medium">Showing <b className="text-white">{paginatedClients.length ? (currentPage - 1) * itemsPerPage + 1 : 0}</b> to <b className="text-white">{Math.min(currentPage * itemsPerPage, filteredClients.length)}</b> of <b className="text-white">{filteredClients.length}</b> items. (Total: {clients.length})</span>
                     </div>
 
                     <div className="overflow-x-auto custom-scrollbar" style={{ WebkitOverflowScrolling: 'touch' }}>
@@ -315,9 +324,9 @@ const TradingClientsPage = ({ onDepositClick, onWithdrawClick, onLogout, onNavig
                                     <tr>
                                         <td colSpan="14" className="px-4 py-12 text-center text-slate-500 font-medium italic">Loading clients...</td>
                                     </tr>
-                                ) : filteredClients.length > 0 ? filteredClients.map((client, index) => (
+                                ) : paginatedClients.length > 0 ? paginatedClients.map((client, index) => (
                                     <tr key={client.id} className="border-t border-white/5 hover:bg-white/[0.02] transition-colors">
-                                        <td className="px-2 sm:px-4 py-3 sm:py-6">{index + 1}</td>
+                                        <td className="px-2 sm:px-4 py-3 sm:py-6">{(currentPage - 1) * itemsPerPage + index + 1}</td>
                                         <td className="px-2 sm:px-4 py-3 sm:py-6">
                                             <div className="flex flex-col items-center gap-1.5">
                                                 <div className="flex items-center gap-2">
@@ -405,9 +414,58 @@ const TradingClientsPage = ({ onDepositClick, onWithdrawClick, onLogout, onNavig
                     </div>
 
                     {/* Pagination */}
-                    <div className="px-5 py-6 border-t border-white/5 flex items-center justify-between bg-[#1a2035]">
-                        <div className="w-8 h-8 flex items-center justify-center bg-[#5cb85c] text-white text-sm font-bold rounded shadow-lg">1</div>
-                    </div>
+                    {totalPages > 1 && (
+                        <div className="px-5 py-4 border-t border-white/5 flex items-center justify-between bg-[#1a2035] flex-wrap gap-4">
+                            <span className="text-slate-400 text-sm">
+                                Page <b className="text-white">{currentPage}</b> of <b className="text-white">{totalPages}</b>
+                            </span>
+                            <div className="flex items-center gap-1">
+                                <button 
+                                    onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
+                                    disabled={currentPage === 1}
+                                    className="px-3 py-1.5 rounded bg-white/5 text-slate-300 hover:bg-white/10 hover:text-white disabled:opacity-50 disabled:cursor-not-allowed transition-colors text-sm font-medium"
+                                >
+                                    Prev
+                                </button>
+                                
+                                {Array.from({ length: totalPages }, (_, i) => i + 1)
+                                    .filter(p => p === 1 || p === totalPages || Math.abs(currentPage - p) <= 2)
+                                    .map((p, i, arr) => {
+                                        if (i > 0 && arr[i] - arr[i-1] > 1) {
+                                            return (
+                                                <React.Fragment key={`ellipsis-${p}`}>
+                                                    <span className="text-slate-500 px-1">...</span>
+                                                    <button
+                                                        onClick={() => setCurrentPage(p)}
+                                                        className={`w-8 h-8 flex items-center justify-center rounded text-sm font-bold transition-all ${currentPage === p ? 'bg-[#5cb85c] text-white shadow-lg' : 'bg-white/5 text-slate-300 hover:bg-white/10'}`}
+                                                    >
+                                                        {p}
+                                                    </button>
+                                                </React.Fragment>
+                                            );
+                                        }
+                                        return (
+                                            <button
+                                                key={p}
+                                                onClick={() => setCurrentPage(p)}
+                                                className={`w-8 h-8 flex items-center justify-center rounded text-sm font-bold transition-all ${currentPage === p ? 'bg-[#5cb85c] text-white shadow-lg' : 'bg-white/5 text-slate-300 hover:bg-white/10'}`}
+                                            >
+                                                {p}
+                                            </button>
+                                        );
+                                    })
+                                }
+
+                                <button 
+                                    onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))}
+                                    disabled={currentPage === totalPages}
+                                    className="px-3 py-1.5 rounded bg-white/5 text-slate-300 hover:bg-white/10 hover:text-white disabled:opacity-50 disabled:cursor-not-allowed transition-colors text-sm font-medium"
+                                >
+                                    Next
+                                </button>
+                            </div>
+                        </div>
+                    )}
                 </div>
             </div>
 
