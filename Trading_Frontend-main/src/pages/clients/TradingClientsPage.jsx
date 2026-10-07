@@ -624,10 +624,10 @@ const TradingClientsPage = ({ onDepositClick, onWithdrawClick, onLogout, onNavig
                                             if (i > 0 && arr[i] - arr[i - 1] > 1) {
                                                 return (
                                                     <React.Fragment key={`ellipsis-${p}`}>
-                                                        <span className="text-slate-500 px-1 select-none">...</span>
+                                                        <span className="text-slate-500 px-1.5 select-none">...</span>
                                                         <button
                                                             onClick={() => setCurrentPage(p)}
-                                                            className={`w-8 h-8 flex items-center justify-center rounded text-sm font-bold transition-all cursor-pointer ${currentPage === p ? 'bg-[#5cb85c] text-white shadow-lg' : 'bg-white/5 text-slate-300 hover:bg-white/10'}`}
+                                                            className={`min-w-[32px] h-8 px-2 flex items-center justify-center rounded text-sm font-bold transition-all cursor-pointer ${currentPage === p ? 'bg-[#5cb85c] text-white shadow-lg' : 'bg-white/5 text-slate-300 hover:bg-white/10'}`}
                                                         >
                                                             {p}
                                                         </button>
@@ -638,7 +638,7 @@ const TradingClientsPage = ({ onDepositClick, onWithdrawClick, onLogout, onNavig
                                                 <button
                                                     key={p}
                                                     onClick={() => setCurrentPage(p)}
-                                                    className={`w-8 h-8 flex items-center justify-center rounded text-sm font-bold transition-all cursor-pointer ${currentPage === p ? 'bg-[#5cb85c] text-white shadow-lg' : 'bg-white/5 text-slate-300 hover:bg-white/10'}`}
+                                                    className={`min-w-[32px] h-8 px-2 flex items-center justify-center rounded text-sm font-bold transition-all cursor-pointer ${currentPage === p ? 'bg-[#5cb85c] text-white shadow-lg' : 'bg-white/5 text-slate-300 hover:bg-white/10'}`}
                                                 >
                                                     {p}
                                                 </button>
