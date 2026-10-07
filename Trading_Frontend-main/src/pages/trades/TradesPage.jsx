@@ -9,15 +9,26 @@ import { displaySymbol } from '../../utils/marketUtils';
 const PAGE_SIZE = 20;
 
 let tradesPageCache = null;
+let tradesPageTotalCache = 0;
 
 export const clearTradesPageCache = () => {
     tradesPageCache = null;
-    try { sessionStorage.removeItem('trades_page_cache'); } catch (e) {}
+    tradesPageTotalCache = 0;
+    try {
+        sessionStorage.removeItem('trades_page_cache');
+        sessionStorage.removeItem('trades_page_total_cache');
+    } catch (e) {}
 };
 
-export const setTradesPageCache = (data) => {
+export const setTradesPageCache = (data, total) => {
     tradesPageCache = data;
-    try { sessionStorage.setItem('trades_page_cache', JSON.stringify(data)); } catch (e) {}
+    if (total) tradesPageTotalCache = total;
+    try {
+        // Cache up to 100 items to avoid sessionStorage quota issues
+        const sliceForStorage = Array.isArray(data) ? data.slice(0, 100) : [];
+        sessionStorage.setItem('trades_page_cache', JSON.stringify(sliceForStorage));
+        if (total) sessionStorage.setItem('trades_page_total_cache', String(total));
+    } catch (e) {}
 };
 
 const getInitialTrades = () => {
@@ -37,18 +48,37 @@ const getInitialTrades = () => {
     return [];
 };
 
+const getInitialTotalTrades = () => {
+    if (tradesPageTotalCache > 0) return tradesPageTotalCache;
+    try {
+        const stored = sessionStorage.getItem('trades_page_total_cache');
+        if (stored) {
+            const parsed = parseInt(stored, 10);
+            if (parsed > 0) {
+                tradesPageTotalCache = parsed;
+                return parsed;
+            }
+        }
+    } catch (e) {}
+    return 18051;
+};
+
 const TradesPage = ({ onCreateClick, onNavigate }) => {
     const { user } = useAuth();
     const navigate = useNavigate();
 
     const initialTrades = getInitialTrades();
     const [trades, setTrades] = useState(initialTrades);
+    const [totalTrades, setTotalTrades] = useState(getInitialTotalTrades);
     const [loading, setLoading] = useState(() => initialTrades.length === 0);
     const [isRefreshing, setIsRefreshing] = useState(false);
+    const [isLoadingMore, setIsLoadingMore] = useState(false);
     const [selectedTrades, setSelectedTrades] = useState([]);
     const [deleteModal, setDeleteModal] = useState({ show: false, trade: null });
     const [deleting, setDeleting] = useState(false);
     const [currentPage, setCurrentPage] = useState(1);
+
+    const fetchSeqRef = useRef(0);
 
     // Sorting state
     const [sortField, setSortField] = useState('id');
@@ -83,6 +113,8 @@ const TradesPage = ({ onCreateClick, onNavigate }) => {
     }, [filters.fromDate, filters.toDate, filters.id, filters.scrip, filters.userId]);
 
     const fetchTrades = async (showLoading = false) => {
+        const currentFetchId = ++fetchSeqRef.current;
+
         if (showLoading && trades.length === 0 && (!tradesPageCache || tradesPageCache.length === 0)) {
             setLoading(true);
         } else {
@@ -96,17 +128,73 @@ const TradesPage = ({ onCreateClick, onNavigate }) => {
                 id: filters.id,
                 scrip: filters.scrip,
                 username: filters.userId,
-                limit: 1000
             };
-            const data = await getTrades(backendFilters);
-            const list = Array.isArray(data) ? data : (data?.data || []);
-            setTradesPageCache(list);
-            setTrades(list);
+
+            // Stage 1: Instant initial load of 50 items
+            const res1 = await getTrades({
+                ...backendFilters,
+                limit: 50,
+                offset: 0
+            });
+            if (fetchSeqRef.current !== currentFetchId) return;
+
+            const list1 = Array.isArray(res1) ? res1 : (res1?.data || []);
+            const grandTotal = typeof res1?.total === 'number' ? res1.total : list1.length;
+
+            setTotalTrades(grandTotal);
+            setTrades(list1);
+            setTradesPageCache(list1, grandTotal);
+            setLoading(false);
+            setIsRefreshing(false);
+
+            // Stage 2: Load next 500 items in background
+            if (list1.length >= 50 && grandTotal > 50) {
+                setIsLoadingMore(true);
+                const res2 = await getTrades({
+                    ...backendFilters,
+                    limit: 500,
+                    offset: 50
+                });
+                if (fetchSeqRef.current !== currentFetchId) return;
+
+                const list2 = Array.isArray(res2) ? res2 : (res2?.data || []);
+                let combined550 = list1;
+                if (list2.length > 0) {
+                    const seenIds = new Set(list1.map(t => t.id));
+                    const newItems2 = list2.filter(t => !seenIds.has(t.id));
+                    combined550 = [...list1, ...newItems2];
+                    setTrades(combined550);
+                    setTradesPageCache(combined550, grandTotal);
+                }
+
+                // Stage 3: Load all remaining data present in trades table
+                if (grandTotal > 550 || list2.length >= 500) {
+                    const remainingLimit = Math.max(50000, grandTotal - 550 + 1000);
+                    const res3 = await getTrades({
+                        ...backendFilters,
+                        limit: remainingLimit,
+                        offset: 550
+                    });
+                    if (fetchSeqRef.current !== currentFetchId) return;
+
+                    const list3 = Array.isArray(res3) ? res3 : (res3?.data || []);
+                    if (list3.length > 0) {
+                        const seenIds550 = new Set(combined550.map(t => t.id));
+                        const newItems3 = list3.filter(t => !seenIds550.has(t.id));
+                        const allCombined = [...combined550, ...newItems3];
+                        setTrades(allCombined);
+                        setTradesPageCache(allCombined, grandTotal);
+                    }
+                }
+            }
         } catch (err) {
             console.error('Failed to fetch trades:', err);
         } finally {
-            setLoading(false);
-            setIsRefreshing(false);
+            if (fetchSeqRef.current === currentFetchId) {
+                setLoading(false);
+                setIsRefreshing(false);
+                setIsLoadingMore(false);
+            }
         }
     };
 
@@ -171,7 +259,12 @@ const TradesPage = ({ onCreateClick, onNavigate }) => {
         return result;
     }, [filteredTrades, sortField, sortDirection]);
 
-    const totalPages = Math.max(1, Math.ceil(sortedTrades.length / PAGE_SIZE));
+    const isClientOnlyFilter = (filters.segment && filters.segment !== 'All') || filters.buyRate || filters.sellRate || filters.lots;
+    const effectiveTotal = isClientOnlyFilter
+        ? filteredTrades.length
+        : Math.max(sortedTrades.length, totalTrades);
+
+    const totalPages = Math.max(1, Math.ceil(effectiveTotal / PAGE_SIZE));
     const safePage = Math.min(currentPage, totalPages);
     const pagedTrades = sortedTrades.slice((safePage - 1) * PAGE_SIZE, safePage * PAGE_SIZE);
 
@@ -190,7 +283,10 @@ const TradesPage = ({ onCreateClick, onNavigate }) => {
         setDeleting(true);
         try {
             await deleteTrade(deleteModal.trade.id);
+            const deletedId = deleteModal.trade.id;
             setDeleteModal({ show: false, trade: null });
+            setTrades(prev => prev.filter(t => t.id !== deletedId));
+            setTotalTrades(prev => Math.max(0, prev - 1));
             fetchTrades();
         } catch (err) {
             alert(err?.response?.data?.message || err?.message || 'Failed to delete');
@@ -343,16 +439,19 @@ const TradesPage = ({ onCreateClick, onNavigate }) => {
                 {/* Table Header */}
                 <div className="px-5 py-3 bg-[#151d30] border-b border-white/5 flex items-center justify-between rounded-t-lg">
                     <span className="text-slate-400 text-xs">
-                        Showing <b className="text-white">{pagedTrades.length ? (safePage - 1) * PAGE_SIZE + 1 : 0}–{Math.min(safePage * PAGE_SIZE, sortedTrades.length)}</b> of <b className="text-white">{sortedTrades.length}</b> items
+                        Showing <b className="text-white">{pagedTrades.length ? (safePage - 1) * PAGE_SIZE + 1 : 0}–{pagedTrades.length ? Math.min(safePage * PAGE_SIZE, effectiveTotal) : 0}</b> of <b className="text-white">{effectiveTotal}</b> items
                     </span>
-                    {isRefreshing && (
-                        <span className="text-xs text-green-400 font-medium flex items-center gap-1.5 animate-pulse">
-                            <span className="w-2 h-2 rounded-full bg-green-400"></span> Updating...
-                        </span>
-                    )}
-                    {selectedTrades.length > 0 && (
-                        <span className="text-xs text-blue-400 font-semibold">{selectedTrades.length} selected</span>
-                    )}
+                    <div className="flex items-center gap-3">
+                      
+                        {isRefreshing && (
+                            <span className="text-xs text-green-400 font-medium flex items-center gap-1.5 animate-pulse">
+                                <span className="w-2 h-2 rounded-full bg-green-400"></span> Updating...
+                            </span>
+                        )}
+                        {selectedTrades.length > 0 && (
+                            <span className="text-xs text-blue-400 font-semibold">{selectedTrades.length} selected</span>
+                        )}
+                    </div>
                 </div>
 
                 <div className="overflow-x-auto" style={{ WebkitOverflowScrolling: 'touch' }}>
@@ -481,7 +580,16 @@ const TradesPage = ({ onCreateClick, onNavigate }) => {
                                     </tr>
                                 );
                             }) : (
-                                <tr><td colSpan="12" className="px-6 py-12 text-center text-slate-500 italic" style={{ border: '1px solid rgba(255,255,255,0.06)' }}>No trades found.</td></tr>
+                                <tr>
+                                    <td colSpan="12" className="px-6 py-12 text-center text-slate-500 italic" style={{ border: '1px solid rgba(255,255,255,0.06)' }}>
+                                        {isLoadingMore ? (
+                                            <div className="flex flex-col items-center justify-center gap-2">
+                                                <div className="w-5 h-5 border-2 border-green-500 border-t-transparent rounded-full animate-spin"></div>
+                                                <span className="text-xs text-slate-400">Loading trades ({trades.length} of {effectiveTotal} loaded)...</span>
+                                            </div>
+                                        ) : 'No trades found.'}
+                                    </td>
+                                </tr>
                             )}
                         </tbody>
                     </table>

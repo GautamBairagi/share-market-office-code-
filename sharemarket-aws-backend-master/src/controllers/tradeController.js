@@ -1908,7 +1908,7 @@ const getTrades = async (req, res) => {
             uc.role as created_by_role,
             t.lot_size_at_entry AS lot_size
             FROM trades t
-            JOIN users u ON t.user_id = u.id
+            LEFT JOIN users u ON t.user_id = u.id
             LEFT JOIN users uc ON t.created_by = uc.id
             WHERE 1=1`;
 
@@ -1958,9 +1958,9 @@ const getTrades = async (req, res) => {
         if (targetUserId) {
             query += ' AND t.user_id = ?';
             params.push(targetUserId);
-        } else if (!req.query.id && req.user.role !== 'TRADER') {
+        } else if (!req.query.id && req.user.role !== 'TRADER' && req.user.role !== 'SUPERADMIN' && req.query.include_demo !== 'true') {
             // Exclude demo trades for overall lists viewed by admin/broker
-            query += ' AND u.is_demo = 0';
+            query += ' AND COALESCE(u.is_demo, 0) = 0';
         }
 
         // Role-based visibility isolation (consistent for both global list and client detail view)
@@ -2018,21 +2018,31 @@ const getTrades = async (req, res) => {
             params.push(req.query.toDate);
         }
 
+        // Calculate true total count matching filters before applying pagination
+        let trueTotalTrades = 0;
+        try {
+            const countQuery = query.replace(/^SELECT\s+[\s\S]*?\s+FROM\s+trades\s+t/i, 'SELECT COUNT(*) as total FROM trades t');
+            const [countRows] = await db.execute(countQuery, [...params]);
+            trueTotalTrades = countRows[0]?.total || 0;
+        } catch (cErr) {
+            console.warn('[getTrades] Count query fallback:', cErr.message);
+        }
+
         query += ' ORDER BY t.id DESC';
 
         // Optional server-side pagination (backward-compatible: no params = old behavior)
         const page = parseInt(req.query.page, 10) || 1;
         const limit = parseInt(req.query.limit, 10) || null;
+        const offset = req.query.offset !== undefined ? parseInt(req.query.offset, 10) : ((page - 1) * (limit || 0));
         if (limit && limit > 0) {
-            const offset = (page - 1) * limit;
             query += ' LIMIT ? OFFSET ?';
-            params.push(limit, offset);
+            params.push(limit, offset >= 0 ? offset : 0);
         }
 
         const [rows] = await db.execute(query, params);
 
-        // Total count for paginated responses
-        const totalTradesCount = rows.length;
+        // Total count for paginated responses (uses true database total)
+        let totalTradesCount = trueTotalTrades || rows.length;
 
 
         const commodityLotService = require('../services/CommodityLotService');
