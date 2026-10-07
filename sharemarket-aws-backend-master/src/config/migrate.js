@@ -738,39 +738,37 @@ const runMigrations = async () => {
 
     // ─── 12. DATA MIGRATIONS ───────────────────────────────────────────────────
 
-    // Ensure every existing TRADER has a user_documents row (kyc_status = VERIFIED
-    // for pre-existing traders so they can still log in after KYC check was added)
-    await db.execute(`
-        INSERT IGNORE INTO user_documents (user_id, kyc_status)
-        SELECT id, 'VERIFIED' FROM users WHERE role = 'TRADER'
-    `);
-
-    // Ensure every existing user has a client_settings row
-    await db.execute(`
-        INSERT IGNORE INTO client_settings (user_id)
-        SELECT id FROM users
-    `);
-
-    // Ensure every existing BROKER/ADMIN has a broker_shares row
-    await db.execute(`
-        INSERT IGNORE INTO broker_shares (user_id)
-        SELECT id FROM users WHERE role IN ('BROKER', 'ADMIN')
-    `);
-
-    // Ensure every existing user has 6 user_segments rows
-    await db.execute(`
-        INSERT IGNORE INTO user_segments (user_id, segment)
-        SELECT u.id, s.segment
-        FROM users u
-        CROSS JOIN (
-            SELECT 'MCX'     AS segment UNION ALL
-            SELECT 'EQUITY'  UNION ALL
-            SELECT 'OPTIONS' UNION ALL
-            SELECT 'COMEX'   UNION ALL
-            SELECT 'FOREX'   UNION ALL
-            SELECT 'CRYPTO'
-        ) s
-    `);
+    // Ensure initial backfill only runs once on legacy setup (avoids 6M row cross-join with large userbases)
+    const [migCheck] = await db.execute("SELECT id FROM db_migrations_log WHERE name = 'initial_user_segments_settings_backfill'");
+    if (migCheck.length === 0) {
+        await db.execute(`
+            INSERT IGNORE INTO user_documents (user_id, kyc_status)
+            SELECT id, 'VERIFIED' FROM users WHERE role = 'TRADER' AND id <= 1000
+        `);
+        await db.execute(`
+            INSERT IGNORE INTO client_settings (user_id)
+            SELECT id FROM users WHERE id <= 1000
+        `);
+        await db.execute(`
+            INSERT IGNORE INTO broker_shares (user_id)
+            SELECT id FROM users WHERE role IN ('BROKER', 'ADMIN')
+        `);
+        await db.execute(`
+            INSERT IGNORE INTO user_segments (user_id, segment)
+            SELECT u.id, s.segment
+            FROM users u
+            CROSS JOIN (
+                SELECT 'MCX'     AS segment UNION ALL
+                SELECT 'EQUITY'  UNION ALL
+                SELECT 'OPTIONS' UNION ALL
+                SELECT 'COMEX'   UNION ALL
+                SELECT 'FOREX'   UNION ALL
+                SELECT 'CRYPTO'
+            ) s
+            WHERE u.id <= 1000
+        `);
+        await db.execute("INSERT IGNORE INTO db_migrations_log (name) VALUES ('initial_user_segments_settings_backfill')");
+    }
 
     // ─── 13. VOICE RECORDINGS ──────────────────────────────────────────────────
 

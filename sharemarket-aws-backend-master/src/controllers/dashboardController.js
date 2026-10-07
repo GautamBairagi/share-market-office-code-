@@ -289,19 +289,25 @@ const getClientLiveM2M = async (req, res) => {
                 };
             });
 
-            // Load hierarchy
-            const [allUsers] = await db.execute("SELECT id, role, parent_id FROM users");
-            allUsers.forEach(u => {
+            // Load hierarchy for brokers/admins only (avoid scanning 1M users)
+            const [adminBrokerUsers] = await db.execute("SELECT id, role, parent_id FROM users WHERE role IN ('SUPERADMIN', 'ADMIN', 'BROKER')");
+            adminBrokerUsers.forEach(u => {
                 userParentMap[u.id] = u.parent_id;
                 userRoleMap[u.id] = u.role;
             });
 
-            const [clientBrokerRows] = await db.execute(`
-                SELECT u.id as client_id, u.parent_id as client_parent_id, cs.broker_id as assigned_broker_id
-                FROM users u
-                LEFT JOIN client_settings cs ON u.id = cs.user_id
-                WHERE u.role = 'TRADER'
-            `);
+            // Only fetch client settings/hierarchy for users that actually have trades
+            const tradeUserIdsForHierarchy = [...new Set(trades.map(t => t.user_id).filter(Boolean))];
+            let clientBrokerRows = [];
+            if (tradeUserIdsForHierarchy.length > 0) {
+                const [rows] = await db.query(`
+                    SELECT u.id as client_id, u.parent_id as client_parent_id, cs.broker_id as assigned_broker_id
+                    FROM users u
+                    LEFT JOIN client_settings cs ON u.id = cs.user_id
+                    WHERE u.id IN (?)
+                `, [tradeUserIdsForHierarchy]);
+                clientBrokerRows = rows;
+            }
 
             clientBrokerRows.forEach(row => {
                 let brokerId = row.assigned_broker_id || row.client_parent_id;
@@ -372,11 +378,15 @@ const getClientLiveM2M = async (req, res) => {
         const isSingleTraderRequest = (role === 'TRADER') || (filterUserId && filterUserRole === 'TRADER');
 
         // Pre-load user configs and precompute price lookup structures once
-        const tradeUserIds = [...new Set(trades.map(t => t.user_id))];
-        const [configRows] = await db.query(
-            'SELECT user_id, config_json FROM client_settings WHERE user_id IN (?)',
-            [tradeUserIds]
-        );
+        const tradeUserIds = [...new Set(trades.map(t => t.user_id).filter(Boolean))];
+        let configRows = [];
+        if (tradeUserIds.length > 0) {
+            const [cRows] = await db.query(
+                'SELECT user_id, config_json FROM client_settings WHERE user_id IN (?)',
+                [tradeUserIds]
+            );
+            configRows = cRows;
+        }
         const configMap = {};
         configRows.forEach(c => {
             try { configMap[c.user_id] = JSON.parse(c.config_json || '{}'); } catch (e) { configMap[c.user_id] = {}; }
