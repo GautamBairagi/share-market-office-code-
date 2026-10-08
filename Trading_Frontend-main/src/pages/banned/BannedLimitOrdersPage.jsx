@@ -147,17 +147,30 @@ const BannedLimitOrdersPage = () => {
   const fetchData = async () => {
     setLoading(true);
     try {
-      const [banData, contractsRes] = await Promise.all([
-        api.getBannedOrders(),
-        api.getSelectedContracts()
-      ]);
-      setBannedItems(banData);
-
-      if (contractsRes && Array.isArray(contractsRes)) {
-        setAllowedContracts(new Set(contractsRes));
+      // 1. Fetch Banned Orders
+      try {
+        const banData = await api.getBannedOrders();
+        const items = Array.isArray(banData)
+          ? banData
+          : (Array.isArray(banData?.data) ? banData.data : []);
+        setBannedItems(items);
+      } catch (banErr) {
+        console.error('Failed to fetch banned orders:', banErr);
+        showToast(banErr.message || 'Failed to fetch banned orders', 'error');
       }
-    } catch (err) {
-      showToast(err.message || 'Failed to fetch data', 'error');
+
+      // 2. Fetch Selected Contracts independently (doesn't block banned table if kite is offline)
+      try {
+        const contractsRes = await api.getSelectedContracts();
+        const contractList = Array.isArray(contractsRes)
+          ? contractsRes
+          : (Array.isArray(contractsRes?.data) ? contractsRes.data : []);
+        if (contractList.length > 0) {
+          setAllowedContracts(new Set(contractList));
+        }
+      } catch (contractsErr) {
+        console.warn('Contracts fetch note (kite disconnected or error):', contractsErr);
+      }
     } finally {
       setLoading(false);
     }
