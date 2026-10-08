@@ -271,6 +271,15 @@ const runMigrations = async () => {
     await addIndex('trades', 'idx_trades_settlement', 'settlement_id');
     await addIndex('trades', 'idx_trades_cf', 'is_carried_forward');
 
+    // Equity units mode columns
+    await addColumn('trades', 'qty_input', 'DECIMAL(10, 2) DEFAULT NULL');
+    await addColumn('trades', 'actual_qty', 'DECIMAL(10, 2) DEFAULT NULL');
+    await addColumn('trades', 'lot_size_at_entry', 'INT DEFAULT 1');
+    await addColumn('trades', 'trade_mode', "VARCHAR(10) DEFAULT 'LOTS'");
+    await addColumn('trades', 'turnover', 'DECIMAL(15, 2) DEFAULT 0');
+    await addColumn('trades', 'leverage_used', 'DECIMAL(5, 2) DEFAULT 1');
+    await addColumn('trades', 'equity_units_mode', 'TINYINT(1) DEFAULT 0');
+
     await addColumn('scrip_data', 'market_type', "ENUM('MCX','NSE','NFO','EQUITY','COMEX','FOREX','CRYPTO','COMMODITY') DEFAULT 'MCX' AFTER margin_req");
     await addColumn('scrip_data', 'expiry_date', "DATE DEFAULT NULL AFTER market_type");
 
