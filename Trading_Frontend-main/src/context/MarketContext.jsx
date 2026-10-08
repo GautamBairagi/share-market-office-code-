@@ -30,9 +30,7 @@ export const MarketProvider = ({ children }) => {
     useEffect(() => {
         if (!user) return;
         
-        const socket = io(SOCKET_URL, {
-            withCredentials: true
-        });
+        const socket = io(SOCKET_URL);
 
         fetchMarkers();
 

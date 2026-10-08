@@ -169,8 +169,9 @@ export const MarketDataProvider = ({ children }) => {
     }, []);
 
     useEffect(() => {
+        const token = typeof localStorage !== 'undefined' ? localStorage.getItem('token') : null;
         const socket = io(api.SOCKET_URL, {
-            withCredentials: true,
+            auth: { token },
             reconnection: true,
             reconnectionDelay: 2000,
             transports: ['websocket']

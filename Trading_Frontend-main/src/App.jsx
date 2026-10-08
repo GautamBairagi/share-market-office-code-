@@ -80,7 +80,6 @@ import ContractManagement from './pages/admin/ContractManagement';
 import { useAuth, ROLES } from './context/AuthContext';
 import * as api from './services/api';
 import useInactivityLogout from './hooks/useInactivityLogout';
-import { encryptData } from './utils/encryption';
 
 function App() {
     const { user, login: authLogin, logout: authLogout, canAccess, applyInitData } = useAuth();
@@ -140,7 +139,7 @@ function App() {
             }
 
             // Store token for API headers
-            localStorage.setItem('token', encryptData(response.token));
+            localStorage.setItem('token', response.token);
 
             // For BROKER role, fetch broker permissions
             let brokerPermissions = {
