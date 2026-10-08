@@ -10,6 +10,7 @@
  */
 
 import api, { setToken, clearToken, getToken } from '../utils/api';
+import { encryptData, decryptData } from '../utils/encryption';
 
 // ═══════════════════════════════════════════════════════════════════════════
 // LOGIN FUNCTION
@@ -46,7 +47,7 @@ export const login = async (email, password) => {
         setToken(token);
         
         // Save user data for AuthContext
-        localStorage.setItem('traders_user', JSON.stringify(user));
+        localStorage.setItem('traders_user', encryptData(user));
         localStorage.setItem('traders_session_valid', 'true');
         console.log('[Auth] ✅ User data saved');
 
@@ -119,7 +120,8 @@ export const getCurrentUser = () => {
             return null;
         }
 
-        const user = JSON.parse(userJson);
+        const user = decryptData(userJson);
+        if (!user) return null;
         console.log('[Auth] ✅ User retrieved:', user.username);
         return user;
 
@@ -193,7 +195,7 @@ export const refreshUserData = async () => {
         const user = response.data;
 
         // Update stored user data
-        localStorage.setItem('traders_user', JSON.stringify(user));
+        localStorage.setItem('traders_user', encryptData(user));
         localStorage.setItem('traders_session_valid', 'true');
         console.log('[Auth] ✅ User data refreshed');
 
@@ -228,7 +230,7 @@ export const updateProfile = async (updates) => {
         const user = response.data;
 
         // Update stored user data
-        localStorage.setItem('traders_user', JSON.stringify(user));
+        localStorage.setItem('traders_user', encryptData(user));
         localStorage.setItem('traders_session_valid', 'true');
         console.log('[Auth] ✅ Profile updated');
 

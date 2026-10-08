@@ -1,6 +1,7 @@
 
 
 import axios from 'axios';
+import { encryptData, decryptData } from './encryption';
 
 // ═══════════════════════════════════════════════════════════════════════════
 // CONFIGURATION
@@ -20,6 +21,7 @@ console.log('[API] Initializing with base URL:', API_BASE_URL);
 const api = axios.create({
     baseURL: API_BASE_URL,
     timeout: 30000,  // 30 second timeout
+    withCredentials: true, // Send HttpOnly cookies automatically
     headers: {
         'Content-Type': 'application/json'
     }
@@ -39,25 +41,22 @@ if (typeof window !== 'undefined' && !sessionStorage.getItem('client_public_ip')
 
 api.interceptors.request.use(
     (config) => {
-        // Get token from localStorage
-        const token = localStorage.getItem('token');
         const clientIp = sessionStorage.getItem('client_public_ip');
 
         console.log(`[API] ${config.method.toUpperCase()} ${config.url}`, {
-            hasToken: !!token,
             timestamp: new Date().toISOString()
         });
 
-        // If token exists, attach it to Authorization header
-        if (token) {
-            config.headers.Authorization = `Bearer ${token}`;
-            console.log('[API] ✅ Token attached to request');
-        } else {
-            console.log('[API] ⚠️  No token found in localStorage');
-        }
-
         if (clientIp) {
             config.headers['X-Client-IP'] = clientIp;
+        }
+
+        // Encrypt request payload
+        if (config.data && !(config.data instanceof FormData) && !config.data._encrypted) {
+            const encryptedPayload = encryptData(config.data);
+            if (encryptedPayload) {
+                config.data = { _encrypted: true, payload: encryptedPayload };
+            }
         }
 
         return config;
@@ -77,6 +76,15 @@ api.interceptors.response.use(
     (response) => {
         // Request successful
         console.log(`[API] ✅ ${response.status} ${response.config.method.toUpperCase()} ${response.config.url}`);
+        
+        // Decrypt response if encrypted
+        if (response.data && response.data._encrypted) {
+            const decrypted = decryptData(response.data.payload);
+            if (decrypted) {
+                response.data = decrypted;
+            }
+        }
+        
         return response;
     },
     (error) => {
@@ -117,7 +125,6 @@ api.interceptors.response.use(
             console.log('[API] 🔴 401 Unauthorized - Token expired or invalid');
 
             // Clear stored data
-            localStorage.removeItem('token');
             localStorage.removeItem('traders_user');
             localStorage.removeItem('traders_session_valid');
             sessionStorage.clear();
@@ -204,43 +211,41 @@ api.interceptors.response.use(
 
 /**
  * Set token and save to localStorage
- * @param {string} token - JWT token
+ * @param {string} token - JWT token (no longer used with HttpOnly cookies)
  */
 export const setToken = (token) => {
-    if (token) {
-        localStorage.setItem('token', token);
-        console.log('[API] ✅ Token saved to localStorage');
-    }
+    // HttpOnly cookie is set by the backend
+    console.log('[API] ✅ Backend handles token via HttpOnly cookie');
 };
 
 /**
  * Get token from localStorage
- * @returns {string|null} JWT token or null
+ * @returns {string|null}
  */
 export const getToken = () => {
-    const token = localStorage.getItem('token');
-    console.log('[API] Token retrieved:', token ? '✅ Found' : '❌ Not found');
-    return token;
+    // Cannot access HttpOnly cookie from JS
+    return null;
 };
 
 /**
  * Clear token and logout
  */
 export const clearToken = () => {
-    localStorage.removeItem('token');
+    // Call backend to clear the cookie (fire and forget)
+    api.post('/auth/logout').catch(() => {});
+
     localStorage.removeItem('traders_user');
     localStorage.removeItem('traders_session_valid');
     sessionStorage.clear();
-    console.log('[API] ✅ Token and user state cleared - Logged out');
+    console.log('[API] ✅ User state cleared - Logged out');
 };
 
 /**
  * Check if user is authenticated
- * @returns {boolean} true if token exists
+ * @returns {boolean} true if user exists in storage
  */
 export const isAuthenticated = () => {
-    const token = localStorage.getItem('token');
-    return !!token;
+    return !!localStorage.getItem('traders_user');
 };
 
 // ═══════════════════════════════════════════════════════════════════════════

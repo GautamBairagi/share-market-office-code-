@@ -1,4 +1,5 @@
 import { createContext, useContext, useState, useEffect } from 'react';
+import { encryptData, decryptData } from '../utils/encryption';
 
 const AuthContext = createContext(null);
 
@@ -83,7 +84,10 @@ export const AuthProvider = ({ children }) => {
         try {
             const saved = sessionStorage.getItem('traders_user');
             const valid = sessionStorage.getItem('traders_session_valid');
-            if (saved && valid === 'true') return JSON.parse(saved);
+            if (saved && valid === 'true') {
+                const decryptedUser = decryptData(saved);
+                return decryptedUser || null;
+            }
         } catch (_) { }
         return null;
     });
@@ -126,7 +130,7 @@ export const AuthProvider = ({ children }) => {
 
     useEffect(() => {
         if (user) {
-            sessionStorage.setItem('traders_user', JSON.stringify(user));
+            sessionStorage.setItem('traders_user', encryptData(user));
             sessionStorage.setItem('traders_session_valid', 'true');
             if (!localStorage.getItem('traders_segment')) {
                 setCurrentSegment(user.segment || 'NIFTY50');
