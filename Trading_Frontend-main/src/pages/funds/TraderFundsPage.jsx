@@ -40,43 +40,36 @@ const TraderFundsPage = ({ onNavigate, onEditFund, onCreateFund }) => {
     });
 
     const [fundsData, setFundsData] = useState([]);
+    const [totalFunds, setTotalFunds] = useState(0);
     const [loading, setLoading] = useState(true);
     const [downloading, setDownloading] = useState(false);
     const [deleteModal, setDeleteModal] = useState({ show: false, fund: null });
     const [deleting, setDeleting] = useState(false);
 
-    // Pagination
-    const PAGE_SIZE = 15;
+    // Server-Side Pagination
+    const [pageSize, setPageSize] = useState(25);
     const [currentPage, setCurrentPage] = useState(1);
+    const [jumpPage, setJumpPage] = useState('');
 
-    // Load all users to get their roles
-    useEffect(() => {
-        const loadUsers = async () => {
-            try {
-                const users = await api.getClients();
-                setAllUsers(users || []);
-            } catch (err) {
-                console.error('Failed to load users:', err);
-            }
-        };
-        loadUsers();
-    }, []);
-
-    useEffect(() => {
-        if (user?.id && allUsers.length > 0) {
-            fetchFunds();
-        }
-    }, [user?.id, allUsers.length]);
-
-    const fetchFunds = async (params = {}) => {
+    const fetchFunds = async (page = currentPage, limit = pageSize, activeFilters = filters) => {
         setLoading(true);
-        setCurrentPage(1); // reset to first page on every fetch
         try {
-            const data = await api.getTraderFunds(params);
-            console.log('[Funds] Full data:', data);
-            console.log('[Funds] Sample fund:', data[0]);
+            const params = {
+                page,
+                limit,
+                paginate: 'true'
+            };
+            if (activeFilters.userId) params.userId = activeFilters.userId;
+            if (activeFilters.amount) params.amount = activeFilters.amount;
+            if (activeFilters.fromDate) params.fromDate = activeFilters.fromDate;
+            if (activeFilters.toDate) params.toDate = activeFilters.toDate;
 
-            setFundsData(data.map(f => ({
+            const res = await api.getTraderFunds(params);
+            const list = Array.isArray(res) ? res : (res?.data || []);
+            const grandTotal = typeof res?.total === 'number' ? res.total : (Array.isArray(res) ? res.length : 0);
+
+            setTotalFunds(grandTotal);
+            setFundsData(list.map(f => ({
                 id: f.id,
                 user_id: f.user_id,
                 username: f.username,
@@ -94,23 +87,27 @@ const TraderFundsPage = ({ onNavigate, onEditFund, onCreateFund }) => {
         }
     };
 
+    useEffect(() => {
+        if (user?.id) {
+            fetchFunds(currentPage, pageSize, filters);
+        }
+    }, [user?.id, currentPage, pageSize]);
+
     const handleFilterChange = (e) => {
         const { name, value } = e.target;
         setFilters(prev => ({ ...prev, [name]: value }));
     };
 
     const handleSearch = () => {
-        const params = {};
-        if (filters.userId) params.userId = filters.userId;
-        if (filters.amount) params.amount = filters.amount;
-        if (filters.fromDate) params.fromDate = filters.fromDate;
-        if (filters.toDate) params.toDate = filters.toDate;
-        fetchFunds(params);
+        setCurrentPage(1);
+        fetchFunds(1, pageSize, filters);
     };
 
     const handleReset = () => {
-        setFilters({ fromDate: '', toDate: '', userId: '', amount: '' });
-        fetchFunds();
+        const resetFilters = { fromDate: '', toDate: '', userId: '', amount: '' };
+        setFilters(resetFilters);
+        setCurrentPage(1);
+        fetchFunds(1, pageSize, resetFilters);
     };
 
     const openDeleteModal = (fund) => {
@@ -122,7 +119,7 @@ const TraderFundsPage = ({ onNavigate, onEditFund, onCreateFund }) => {
         try {
             await api.deleteFund(deleteModal.fund.id);
             setDeleteModal({ show: false, fund: null });
-            fetchFunds();
+            fetchFunds(currentPage, pageSize, filters);
         } catch (err) {
             alert(err?.response?.data?.message || err?.message || 'Failed to delete');
         } finally {
@@ -133,14 +130,18 @@ const TraderFundsPage = ({ onNavigate, onEditFund, onCreateFund }) => {
     const handleDownloadReport = async () => {
         setDownloading(true);
         try {
-            const params = {};
+            const params = {
+                limit: 5000,
+                paginate: 'false'
+            };
             if (filters.userId) params.userId = filters.userId;
             if (filters.amount) params.amount = filters.amount;
             if (filters.fromDate) params.fromDate = filters.fromDate;
             if (filters.toDate) params.toDate = filters.toDate;
 
-            // Fetch current filtered data
-            const data = await api.getTraderFunds(params);
+            // Fetch current filtered data for report
+            const res = await api.getTraderFunds(params);
+            const data = Array.isArray(res) ? res : (res?.data || []);
 
             // Create CSV
             const headers = ['ID', 'Username', 'Name', 'Type', 'Amount', 'Notes', 'Created At'];
@@ -177,8 +178,7 @@ const TraderFundsPage = ({ onNavigate, onEditFund, onCreateFund }) => {
     };
 
     // Pagination derived values
-    const totalPages = Math.max(1, Math.ceil(fundsData.length / PAGE_SIZE));
-    const paginatedFunds = fundsData.slice((currentPage - 1) * PAGE_SIZE, currentPage * PAGE_SIZE);
+    const totalPages = Math.max(1, Math.ceil(totalFunds / pageSize));
 
     const getPageNumbers = () => {
         const pages = [];
@@ -191,6 +191,15 @@ const TraderFundsPage = ({ onNavigate, onEditFund, onCreateFund }) => {
         if (right < totalPages - 1) pages.push('...');
         if (totalPages > 1) pages.push(totalPages);
         return pages;
+    };
+
+    const handleJumpPage = (e) => {
+        e.preventDefault();
+        const p = parseInt(jumpPage, 10);
+        if (p >= 1 && p <= totalPages) {
+            setCurrentPage(p);
+            setJumpPage('');
+        }
     };
 
     return (
@@ -254,10 +263,28 @@ const TraderFundsPage = ({ onNavigate, onEditFund, onCreateFund }) => {
 
                 {/* Results Table */}
                 <div className="bg-[#1f283e] rounded-lg border border-white/10 shadow-xl overflow-hidden">
-                    <div className="px-6 py-4 bg-[#1a2035] border-b border-white/10">
+                    <div className="px-6 py-4 bg-[#1a2035] border-b border-white/10 flex flex-wrap items-center justify-between gap-3">
                         <span className="text-slate-400 text-sm">
-                            Showing <b className="text-white">{paginatedFunds.length}</b> of <b className="text-white">{fundsData.length}</b> items.
+                            Showing <b className="text-white">{totalFunds > 0 ? ((currentPage - 1) * pageSize) + 1 : 0}</b> to <b className="text-white">{Math.min(currentPage * pageSize, totalFunds)}</b> of <b className="text-white">{totalFunds.toLocaleString()}</b> items.
                         </span>
+                        <div className="flex items-center gap-2 text-xs text-slate-400">
+                            <span>Rows per page:</span>
+                            <select
+                                value={pageSize}
+                                onChange={(e) => {
+                                    const newSize = Number(e.target.value);
+                                    setPageSize(newSize);
+                                    setCurrentPage(1);
+                                }}
+                                className="bg-[#141b2d] border border-white/10 text-white rounded px-2.5 py-1 text-xs outline-none focus:border-green-400 cursor-pointer"
+                            >
+                                <option value={15}>15</option>
+                                <option value={25}>25</option>
+                                <option value={50}>50</option>
+                                <option value={100}>100</option>
+                                <option value={250}>250</option>
+                            </select>
+                        </div>
                     </div>
 
                     <div className="overflow-x-auto">
@@ -276,8 +303,17 @@ const TraderFundsPage = ({ onNavigate, onEditFund, onCreateFund }) => {
                                 </tr>
                             </thead>
                             <tbody className="text-sm text-slate-300">
-                                {paginatedFunds.length > 0 ? (
-                                    paginatedFunds.map((fund) => {
+                                {loading ? (
+                                    <tr>
+                                        <td colSpan="9" className="px-6 py-12 text-center text-slate-400">
+                                            <div className="flex items-center justify-center gap-2">
+                                                <Loader2 className="w-5 h-5 animate-spin text-green-400" />
+                                                <span>Loading funds...</span>
+                                            </div>
+                                        </td>
+                                    </tr>
+                                ) : fundsData.length > 0 ? (
+                                    fundsData.map((fund) => {
                                         const typeUpper = (fund.txnType || fund.type || '').toUpperCase();
                                         const notesUpper = (fund.notes || '').toUpperCase();
                                         const isSettlement = typeUpper === 'WEEKLY_SETTLEMENT' || notesUpper.includes('WEEKLY SETTLEMENT');
@@ -332,9 +368,19 @@ const TraderFundsPage = ({ onNavigate, onEditFund, onCreateFund }) => {
                     {totalPages > 1 && (
                         <div className="px-5 py-4 border-t border-white/5 bg-[#1a2035] flex items-center justify-between gap-3 flex-wrap">
                             <span className="text-slate-400 text-xs">
-                                Page <b className="text-white">{currentPage}</b> of <b className="text-white">{totalPages}</b>
+                                Page <b className="text-white">{currentPage}</b> of <b className="text-white">{totalPages.toLocaleString()}</b>
                             </span>
-                            <div className="flex items-center gap-1.5">
+                            <div className="flex items-center gap-1.5 flex-wrap">
+                                {/* First */}
+                                <button
+                                    onClick={() => setCurrentPage(1)}
+                                    disabled={currentPage === 1}
+                                    className="px-2.5 py-1.5 rounded text-xs font-bold bg-white/5 hover:bg-white/10 disabled:opacity-30 disabled:cursor-not-allowed text-white transition-all"
+                                    title="First Page"
+                                >
+                                    « First
+                                </button>
+
                                 {/* Prev */}
                                 <button
                                     onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
@@ -372,6 +418,36 @@ const TraderFundsPage = ({ onNavigate, onEditFund, onCreateFund }) => {
                                 >
                                     Next →
                                 </button>
+
+                                {/* Last */}
+                                <button
+                                    onClick={() => setCurrentPage(totalPages)}
+                                    disabled={currentPage === totalPages}
+                                    className="px-2.5 py-1.5 rounded text-xs font-bold bg-white/5 hover:bg-white/10 disabled:opacity-30 disabled:cursor-not-allowed text-white transition-all"
+                                    title="Last Page"
+                                >
+                                    Last »
+                                </button>
+
+                                {/* Jump to page */}
+                                <form onSubmit={handleJumpPage} className="flex items-center gap-1 ml-2">
+                                    <input
+                                        type="number"
+                                        min="1"
+                                        max={totalPages}
+                                        value={jumpPage}
+                                        onChange={(e) => setJumpPage(e.target.value)}
+                                        placeholder="Go to"
+                                        className="w-16 bg-[#141b2d] border border-white/10 text-white rounded px-2 py-1 text-xs text-center outline-none focus:border-green-400"
+                                    />
+                                    <button
+                                        type="submit"
+                                        disabled={!jumpPage}
+                                        className="px-2 py-1 bg-white/10 hover:bg-white/20 disabled:opacity-30 text-white rounded text-xs font-bold transition-all"
+                                    >
+                                        Go
+                                    </button>
+                                </form>
                             </div>
                         </div>
                     )}

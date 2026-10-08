@@ -38,7 +38,7 @@ const GroupTradesPage = () => {
                 minUsers: customFilters.minUsers
             });
             setGroups(Array.isArray(data) ? data : []);
-            
+
             // If group is selected, find the updated group data
             if (selectedGroup) {
                 const updated = data.find(g => g.groupId === selectedGroup.groupId);
@@ -103,10 +103,10 @@ const GroupTradesPage = () => {
     const groupDetailTrades = selectedGroup ? getFilteredTradesOfGroup(selectedGroup) : [];
 
     return (
-        <div className="flex flex-col min-h-full bg-[#1a2035] space-y-5 pb-10">
+        <div className="w-full space-y-4 sm:space-y-5 pb-10">
             {/* Filter Card */}
-            <div className="bg-[#1f283e] p-5 rounded-lg border border-white/5 shadow-xl mx-3 sm:mx-6 mt-4">
-                <div className="grid grid-cols-2 md:grid-cols-4 gap-5 mb-5">
+            <div className="bg-[#1f283e] p-4 sm:p-5 rounded-lg border border-white/5 shadow-xl mx-2 sm:mx-6 mt-2 sm:mt-4">
+                <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-4 sm:gap-5 mb-5">
                     <div>
                         <label className="text-slate-500 text-[10px] uppercase tracking-widest block mb-1.5">ID</label>
                         <input
@@ -200,16 +200,16 @@ const GroupTradesPage = () => {
                         </select>
                     </div>
                 </div>
-                <div className="flex gap-3">
+                <div className="flex flex-wrap gap-3">
                     <button
                         onClick={handleSearch}
-                        className="text-white font-bold py-2 px-8 rounded uppercase tracking-widest text-[11px] transition-all active:scale-95 bg-[#4CAF50] hover:bg-[#43A047]"
+                        className="text-white font-bold py-2 px-8 rounded uppercase tracking-widest text-[11px] transition-all active:scale-95 bg-[#4CAF50] hover:bg-[#43A047] cursor-pointer"
                     >
                         SEARCH
                     </button>
                     <button
                         onClick={handleReset}
-                        className="bg-[#607d8b] hover:bg-[#546e7a] text-white font-bold py-2 px-8 rounded uppercase tracking-widest text-[11px] transition-all"
+                        className="bg-[#607d8b] hover:bg-[#546e7a] text-white font-bold py-2 px-8 rounded uppercase tracking-widest text-[11px] transition-all cursor-pointer"
                     >
                         RESET
                     </button>
@@ -219,45 +219,59 @@ const GroupTradesPage = () => {
             {/* Results section */}
             {!selectedGroup ? (
                 /* Group Summary List */
-                <div className="bg-[#1f283e] rounded-lg border border-white/5 shadow-xl mx-3 sm:mx-6 overflow-hidden">
-                    <div className="px-5 py-4 bg-[#151d30] border-b border-white/5">
-                        <h2 className="text-white font-bold text-sm uppercase tracking-wider">Detected Coordinated Group Trades</h2>
-                        <p className="text-slate-500 text-[11px] mt-1">Showing trade execution clusters where multiple users executed identical scrips within {filters.timeWindow} seconds.</p>
+                <div className="bg-[#1f283e] rounded-lg border border-white/5 shadow-xl mx-2 sm:mx-6 overflow-hidden">
+                    <div className="px-4 sm:px-5 py-3 sm:py-4 bg-[#151d30] border-b border-white/5 flex flex-wrap items-center justify-between gap-2">
+                        <div>
+                            <h2 className="text-white font-bold text-sm uppercase tracking-wider">Detected Coordinated Group Trades</h2>
+                            <p className="text-slate-500 text-[11px] mt-0.5 sm:mt-1">Showing trade execution clusters where multiple users executed identical scrips within {filters.timeWindow} seconds.</p>
+                        </div>
+                        <span className="text-slate-400 text-xs font-semibold">
+                            Total Groups: <b className="text-white">{groups.length}</b>
+                        </span>
                     </div>
 
-                    <div className="overflow-x-auto">
-                        <table className="w-full text-left whitespace-nowrap" style={{ borderCollapse: 'collapse' }}>
-                            <thead>
-                                <tr className="text-slate-400 text-[11px] uppercase tracking-wider bg-[#151d30]" style={{ borderBottom: '2px solid rgba(255,255,255,0.08)' }}>
-                                    <th className="px-4 py-3.5 font-semibold" style={{ border: '1px solid rgba(255,255,255,0.06)' }}>Actions</th>
-                                    <th className="px-4 py-3.5 font-semibold" style={{ border: '1px solid rgba(255,255,255,0.06)' }}>Group ID</th>
-                                    <th className="px-4 py-3.5 font-semibold" style={{ border: '1px solid rgba(255,255,255,0.06)' }}>Scrip</th>
-                                    <th className="px-4 py-3.5 font-semibold" style={{ border: '1px solid rgba(255,255,255,0.06)' }}>Segment</th>
-                                    <th className="px-4 py-3.5 font-semibold" style={{ border: '1px solid rgba(255,255,255,0.06)' }}>Type</th>
-                                    <th className="px-4 py-3.5 font-semibold" style={{ border: '1px solid rgba(255,255,255,0.06)' }}>Users Count</th>
-                                    <th className="px-4 py-3.5 font-semibold" style={{ border: '1px solid rgba(255,255,255,0.06)' }}>Total Lots</th>
-                                    <th className="px-4 py-3.5 font-semibold" style={{ border: '1px solid rgba(255,255,255,0.06)' }}>Avg Price</th>
-                                    <th className="px-4 py-3.5 font-semibold" style={{ border: '1px solid rgba(255,255,255,0.06)' }}>First Trade</th>
-                                    <th className="px-4 py-3.5 font-semibold" style={{ border: '1px solid rgba(255,255,255,0.06)' }}>Last Trade</th>
-                                    <th className="px-4 py-3.5 font-semibold" style={{ border: '1px solid rgba(255,255,255,0.06)' }}>Time Span</th>
+                    <div
+                        className="w-full overflow-x-auto overflow-y-auto max-h-[65vh] sm:max-h-[600px] custom-scrollbar"
+                        style={{
+                            WebkitOverflowScrolling: 'touch',
+                            touchAction: 'pan-x pan-y'
+                        }}
+                    >
+                        <table className="w-full text-left whitespace-nowrap" style={{ minWidth: '1250px', borderCollapse: 'separate', borderSpacing: 0 }}>
+                            <thead className="sticky top-0 z-20 bg-[#151d30]">
+                                <tr className="text-slate-400 text-[11px] uppercase tracking-wider bg-[#151d30]">
+                                    <th className="px-4 py-3.5 font-semibold bg-[#151d30] sticky top-0" style={{ borderBottom: '2px solid rgba(255,255,255,0.08)', borderRight: '1px solid rgba(255,255,255,0.06)' }}>Actions</th>
+                                    <th className="px-4 py-3.5 font-semibold bg-[#151d30] sticky top-0" style={{ borderBottom: '2px solid rgba(255,255,255,0.08)', borderRight: '1px solid rgba(255,255,255,0.06)' }}>Group ID</th>
+                                    <th className="px-4 py-3.5 font-semibold bg-[#151d30] sticky top-0" style={{ borderBottom: '2px solid rgba(255,255,255,0.08)', borderRight: '1px solid rgba(255,255,255,0.06)' }}>Scrip</th>
+                                    <th className="px-4 py-3.5 font-semibold bg-[#151d30] sticky top-0" style={{ borderBottom: '2px solid rgba(255,255,255,0.08)', borderRight: '1px solid rgba(255,255,255,0.06)' }}>Segment</th>
+                                    <th className="px-4 py-3.5 font-semibold bg-[#151d30] sticky top-0" style={{ borderBottom: '2px solid rgba(255,255,255,0.08)', borderRight: '1px solid rgba(255,255,255,0.06)' }}>Type</th>
+                                    <th className="px-4 py-3.5 font-semibold bg-[#151d30] sticky top-0" style={{ borderBottom: '2px solid rgba(255,255,255,0.08)', borderRight: '1px solid rgba(255,255,255,0.06)' }}>Users Count</th>
+                                    <th className="px-4 py-3.5 font-semibold bg-[#151d30] sticky top-0" style={{ borderBottom: '2px solid rgba(255,255,255,0.08)', borderRight: '1px solid rgba(255,255,255,0.06)' }}>Total Lots</th>
+                                    <th className="px-4 py-3.5 font-semibold bg-[#151d30] sticky top-0" style={{ borderBottom: '2px solid rgba(255,255,255,0.08)', borderRight: '1px solid rgba(255,255,255,0.06)' }}>Avg Price</th>
+                                    <th className="px-4 py-3.5 font-semibold bg-[#151d30] sticky top-0" style={{ borderBottom: '2px solid rgba(255,255,255,0.08)', borderRight: '1px solid rgba(255,255,255,0.06)' }}>First Trade</th>
+                                    <th className="px-4 py-3.5 font-semibold bg-[#151d30] sticky top-0" style={{ borderBottom: '2px solid rgba(255,255,255,0.08)', borderRight: '1px solid rgba(255,255,255,0.06)' }}>Last Trade</th>
+                                    <th className="px-4 py-3.5 font-semibold bg-[#151d30] sticky top-0" style={{ borderBottom: '2px solid rgba(255,255,255,0.08)' }}>Time Span</th>
                                 </tr>
                             </thead>
                             <tbody className="text-[13px] text-slate-300">
                                 {loading ? (
                                     <tr>
-                                        <td colSpan="11" className="px-6 py-12 text-center text-slate-500 italic" style={{ border: '1px solid rgba(255,255,255,0.06)' }}>
+                                        <td colSpan="11" className="px-6 py-12 text-center text-slate-500 italic" style={{ borderBottom: '1px solid rgba(255,255,255,0.06)' }}>
                                             Detecting coordinated group trades...
                                         </td>
                                     </tr>
                                 ) : groups.length > 0 ? (
                                     groups.map((g) => {
-                                        const cellStyle = { border: '1px solid rgba(255,255,255,0.06)' };
+                                        const cellStyle = {
+                                            borderBottom: '1px solid rgba(255,255,255,0.06)',
+                                            borderRight: '1px solid rgba(255,255,255,0.06)'
+                                        };
                                         return (
-                                            <tr key={g.groupId} className="hover:bg-white/[0.02] transition-colors">
+                                            <tr key={g.groupId} className="hover:bg-white/[0.03] transition-colors">
                                                 <td className="px-4 py-3" style={cellStyle}>
                                                     <button
                                                         onClick={() => setSelectedGroup(g)}
-                                                        className="text-slate-400 hover:text-blue-400 transition-colors flex items-center gap-1.5"
+                                                        className="text-slate-400 hover:text-blue-400 transition-colors flex items-center gap-1.5 cursor-pointer"
                                                         title="View Details"
                                                     >
                                                         <Eye className="w-[15px] h-[15px]" />
@@ -277,7 +291,7 @@ const GroupTradesPage = () => {
                                                 <td className="px-4 py-3 font-mono text-slate-200" style={cellStyle}>{parseFloat(g.avgPrice).toFixed(2)}</td>
                                                 <td className="px-4 py-3 text-[11px] text-slate-400" style={cellStyle}>{fmtTime(g.firstTradeTime)}</td>
                                                 <td className="px-4 py-3 text-[11px] text-slate-400" style={cellStyle}>{fmtTime(g.lastTradeTime)}</td>
-                                                <td className="px-4 py-3 font-mono" style={cellStyle}>
+                                                <td className="px-4 py-3 font-mono" style={{ borderBottom: '1px solid rgba(255,255,255,0.06)' }}>
                                                     <span className="text-yellow-500 font-semibold">{g.timeDifference}s</span>
                                                     {g.highlyCoordinated && (
                                                         <span className="ml-2 px-1.5 py-0.5 bg-red-500/20 text-red-400 border border-red-500/30 text-[9px] font-black rounded-full uppercase tracking-wider">Coordinated Exit</span>
@@ -288,7 +302,7 @@ const GroupTradesPage = () => {
                                     })
                                 ) : (
                                     <tr>
-                                        <td colSpan="11" className="px-6 py-12 text-center text-slate-500 italic uppercase text-[11px] tracking-wider" style={{ border: '1px solid rgba(255,255,255,0.06)' }}>
+                                        <td colSpan="11" className="px-6 py-12 text-center text-slate-500 italic uppercase text-[11px] tracking-wider" style={{ borderBottom: '1px solid rgba(255,255,255,0.06)' }}>
                                             No coordinated trade groups detected matching current filters.
                                         </td>
                                     </tr>
@@ -299,18 +313,20 @@ const GroupTradesPage = () => {
                 </div>
             ) : (
                 /* Group Detailed View with styled orange table */
-                <div className="space-y-5 mx-3 sm:mx-6">
+                <div className="space-y-4 sm:space-y-5 mx-2 sm:mx-6">
                     {/* Meta Card */}
-                    <div className="bg-[#1f283e] p-5 rounded-lg border border-white/5 shadow-xl relative">
-                        <button
-                            onClick={() => setSelectedGroup(null)}
-                            className="absolute top-4 right-4 bg-[#607d8b] hover:bg-[#546e7a] text-white font-bold py-1.5 px-4 rounded text-xs transition-all"
-                        >
-                            Back to Groups List
-                        </button>
-                        <h2 className="text-[#4fc3f7] font-bold text-base font-mono mb-4">Group details: {selectedGroup.groupId}</h2>
-                        
-                        <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-6">
+                    <div className="bg-[#1f283e] p-4 sm:p-5 rounded-lg border border-white/5 shadow-xl relative">
+                        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-4">
+                            <h2 className="text-[#4fc3f7] font-bold text-base font-mono">Group details: {selectedGroup.groupId}</h2>
+                            <button
+                                onClick={() => setSelectedGroup(null)}
+                                className="bg-[#607d8b] hover:bg-[#546e7a] text-white font-bold py-1.5 px-4 rounded text-xs transition-all self-start sm:self-auto cursor-pointer"
+                            >
+                                Back to Groups List
+                            </button>
+                        </div>
+
+                        <div className="grid grid-cols-2 sm:grid-cols-2 md:grid-cols-4 gap-4 sm:gap-6">
                             <div>
                                 <span className="text-slate-500 text-[10px] uppercase block mb-1">Scrip</span>
                                 <span className="text-white font-bold text-sm">{selectedGroup.symbol}</span>
@@ -361,7 +377,7 @@ const GroupTradesPage = () => {
 
                     {/* Group Trades Table (Custom Orange/Brown Style) */}
                     <div className="bg-[#1f283e] rounded-lg border border-white/5 shadow-xl overflow-hidden">
-                        <div className="px-5 py-4 bg-[#151d30] border-b border-white/5 flex items-center justify-between">
+                        <div className="px-4 sm:px-5 py-3 sm:py-4 bg-[#151d30] border-b border-white/5 flex flex-wrap items-center justify-between gap-2">
                             <h3 className="text-white font-bold text-sm uppercase tracking-wider">Coordinated Trades ({groupDetailTrades.length})</h3>
                             {selectedGroup.highlyCoordinated && (
                                 <span className="px-3 py-1 bg-red-600/20 text-red-400 border border-red-500/30 text-[10px] font-black rounded-full uppercase tracking-widest animate-pulse">
@@ -370,35 +386,42 @@ const GroupTradesPage = () => {
                             )}
                         </div>
 
-                        <div className="overflow-x-auto">
-                            <table className="w-full text-left whitespace-nowrap" style={{ borderCollapse: 'collapse' }}>
-                                <thead>
-                                    <tr className="text-slate-400 text-[11px] uppercase tracking-wider bg-[#151d30]" style={{ borderBottom: '2px solid rgba(255,255,255,0.08)' }}>
-                                        <th className="px-4 py-3.5 font-semibold" style={{ border: '1px solid rgba(255,255,255,0.06)' }}>Actions</th>
-                                        <th className="px-4 py-3.5 font-semibold" style={{ border: '1px solid rgba(255,255,255,0.06)' }}>ID ↕</th>
-                                        <th className="px-4 py-3.5 font-semibold" style={{ border: '1px solid rgba(255,255,255,0.06)' }}>Scrip</th>
-                                        <th className="px-4 py-3.5 font-semibold" style={{ border: '1px solid rgba(255,255,255,0.06)' }}>Segment</th>
-                                        <th className="px-4 py-3.5 font-semibold" style={{ border: '1px solid rgba(255,255,255,0.06)' }}>User ID</th>
-                                        <th className="px-4 py-3.5 font-semibold" style={{ border: '1px solid rgba(255,255,255,0.06)' }}>Buy Rate</th>
-                                        <th className="px-4 py-3.5 font-semibold" style={{ border: '1px solid rgba(255,255,255,0.06)' }}>Sell Rate</th>
-                                        <th className="px-4 py-3.5 font-semibold" style={{ border: '1px solid rgba(255,255,255,0.06)' }}>Lots / Units</th>
-                                        <th className="px-4 py-3.5 font-semibold" style={{ border: '1px solid rgba(255,255,255,0.06)' }}>Bought at</th>
-                                        <th className="px-4 py-3.5 font-semibold" style={{ border: '1px solid rgba(255,255,255,0.06)' }}>Sold at</th>
+                        <div
+                            className="w-full overflow-x-auto overflow-y-auto max-h-[65vh] sm:max-h-[600px] custom-scrollbar"
+                            style={{
+                                WebkitOverflowScrolling: 'touch',
+                                touchAction: 'pan-x pan-y'
+                            }}
+                        >
+                            <table className="w-full text-left whitespace-nowrap" style={{ minWidth: '1150px', borderCollapse: 'separate', borderSpacing: 0 }}>
+                                <thead className="sticky top-0 z-20 bg-[#151d30]">
+                                    <tr className="text-slate-400 text-[11px] uppercase tracking-wider bg-[#151d30]">
+                                        <th className="px-4 py-3.5 font-semibold bg-[#151d30] sticky top-0" style={{ borderBottom: '2px solid rgba(255,255,255,0.08)', borderRight: '1px solid rgba(255,255,255,0.06)' }}>Actions</th>
+                                        <th className="px-4 py-3.5 font-semibold bg-[#151d30] sticky top-0" style={{ borderBottom: '2px solid rgba(255,255,255,0.08)', borderRight: '1px solid rgba(255,255,255,0.06)' }}>ID ↕</th>
+                                        <th className="px-4 py-3.5 font-semibold bg-[#151d30] sticky top-0" style={{ borderBottom: '2px solid rgba(255,255,255,0.08)', borderRight: '1px solid rgba(255,255,255,0.06)' }}>Scrip</th>
+                                        <th className="px-4 py-3.5 font-semibold bg-[#151d30] sticky top-0" style={{ borderBottom: '2px solid rgba(255,255,255,0.08)', borderRight: '1px solid rgba(255,255,255,0.06)' }}>Segment</th>
+                                        <th className="px-4 py-3.5 font-semibold bg-[#151d30] sticky top-0" style={{ borderBottom: '2px solid rgba(255,255,255,0.08)', borderRight: '1px solid rgba(255,255,255,0.06)' }}>User ID</th>
+                                        <th className="px-4 py-3.5 font-semibold bg-[#151d30] sticky top-0" style={{ borderBottom: '2px solid rgba(255,255,255,0.08)', borderRight: '1px solid rgba(255,255,255,0.06)' }}>Buy Rate</th>
+                                        <th className="px-4 py-3.5 font-semibold bg-[#151d30] sticky top-0" style={{ borderBottom: '2px solid rgba(255,255,255,0.08)', borderRight: '1px solid rgba(255,255,255,0.06)' }}>Sell Rate</th>
+                                        <th className="px-4 py-3.5 font-semibold bg-[#151d30] sticky top-0" style={{ borderBottom: '2px solid rgba(255,255,255,0.08)', borderRight: '1px solid rgba(255,255,255,0.06)' }}>Lots / Units</th>
+                                        <th className="px-4 py-3.5 font-semibold bg-[#151d30] sticky top-0" style={{ borderBottom: '2px solid rgba(255,255,255,0.08)', borderRight: '1px solid rgba(255,255,255,0.06)' }}>Bought at</th>
+                                        <th className="px-4 py-3.5 font-semibold bg-[#151d30] sticky top-0" style={{ borderBottom: '2px solid rgba(255,255,255,0.08)' }}>Sold at</th>
                                     </tr>
                                 </thead>
                                 <tbody className="text-[13px] text-slate-200">
                                     {groupDetailTrades.length > 0 ? (
                                         groupDetailTrades.map((t) => {
                                             const cellStyle = {
-                                                border: '1px solid rgba(255,255,255,0.06)',
-                                                backgroundColor: 'rgba(162, 116, 24, 0.25)' // Orange-brown style as per screenshot
+                                                borderBottom: '1px solid rgba(255,255,255,0.06)',
+                                                borderRight: '1px solid rgba(255,255,255,0.06)',
+                                                backgroundColor: 'rgba(162, 116, 24, 0.25)' // Orange-brown style as per original
                                             };
                                             return (
                                                 <tr key={t.id} className="hover:bg-white/[0.05] transition-colors">
                                                     <td className="px-4 py-3" style={cellStyle}>
                                                         <button
                                                             onClick={() => window.open(`/trades/details/${t.id}`, '_blank')}
-                                                            className="text-slate-200 hover:text-white transition-colors"
+                                                            className="text-slate-200 hover:text-white transition-colors cursor-pointer"
                                                             title="View Detail"
                                                         >
                                                             <Eye className="w-[15px] h-[15px]" />
@@ -428,7 +451,7 @@ const GroupTradesPage = () => {
                                                     <td className="px-4 py-3 text-[11px] text-slate-300 whitespace-nowrap" style={cellStyle}>
                                                         {t.type === 'BUY' ? fmtTime(t.entry_time) : fmtTime(t.exit_time)}
                                                     </td>
-                                                    <td className="px-4 py-3 text-[11px] text-slate-300 whitespace-nowrap" style={cellStyle}>
+                                                    <td className="px-4 py-3 text-[11px] text-slate-300 whitespace-nowrap" style={{ borderBottom: '1px solid rgba(255,255,255,0.06)', backgroundColor: 'rgba(162, 116, 24, 0.25)' }}>
                                                         {t.type === 'SELL' ? fmtTime(t.entry_time) : (t.exit_time ? fmtTime(t.exit_time) : '(not set)')}
                                                     </td>
                                                 </tr>
@@ -436,7 +459,7 @@ const GroupTradesPage = () => {
                                         })
                                     ) : (
                                         <tr>
-                                            <td colSpan="10" className="px-6 py-12 text-center text-slate-500 italic" style={{ border: '1px solid rgba(255,255,255,0.06)' }}>
+                                            <td colSpan="10" className="px-6 py-12 text-center text-slate-500 italic" style={{ borderBottom: '1px solid rgba(255,255,255,0.06)' }}>
                                                 No trades matched the criteria.
                                             </td>
                                         </tr>

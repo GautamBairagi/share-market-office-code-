@@ -2363,7 +2363,18 @@ const getGroupTrades = async (req, res) => {
 
         let query = `
             SELECT
-                t.*,
+                t.id,
+                t.user_id,
+                t.symbol,
+                t.type,
+                t.market_type,
+                t.qty,
+                t.entry_price,
+                t.exit_price,
+                t.entry_time,
+                t.exit_time,
+                t.status,
+                t.created_by,
                 u.username,
                 u.full_name
             FROM trades t
@@ -2377,7 +2388,7 @@ const getGroupTrades = async (req, res) => {
             query += ` AND t.user_id = ?`;
             params.push(id);
         } else if (role === 'SUPERADMIN') {
-            console.log('[getGroupTrades] SUPERADMIN viewing all groups');
+            // Superadmin views all groups
         } else if (role === 'ADMIN') {
             query += ` AND (t.created_by = ? OR t.user_id IN (
                 SELECT u.id FROM users u 
@@ -2406,17 +2417,21 @@ const getGroupTrades = async (req, res) => {
             params.push(segment);
         }
 
-        // Filter by date range
+        // Filter by date range (default to last 7 days if none specified to avoid full table filesort)
         if (fromDate) {
             query += ` AND DATE(t.entry_time) >= ?`;
             params.push(fromDate);
+        } else if (!req.query.all) {
+            query += ` AND t.entry_time >= NOW() - INTERVAL 7 DAY`;
         }
+
         if (toDate) {
             query += ` AND DATE(t.entry_time) <= ?`;
             params.push(toDate);
         }
 
-        query += ` ORDER BY t.symbol ASC, t.type ASC, t.entry_time ASC`;
+        // Use indexed t.id DESC with limit to avoid large on-disk temporary tables in C:\xampp\tmp
+        query += ` ORDER BY t.id DESC LIMIT 2000`;
 
         const [rows] = await db.execute(query, params);
 
