@@ -111,7 +111,8 @@ export const getClosedPositions = async (filters = {}) => {
 
 // ─── TRADES ──────────────────────────────────────────
 export const getTrades = async (filters = {}) => {
-    const response = await api.get('/trades', { params: filters });
+    const { signal, ...params } = filters;
+    const response = await api.get('/trades', { params, signal });
     return response.data;
 };
 
