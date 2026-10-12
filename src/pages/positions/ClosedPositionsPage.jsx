@@ -16,9 +16,11 @@ const ClosedPositionsPage = () => {
         try {
             const { getClosedPositions } = await import('../../services/api');
             const data = await getClosedPositions();
-            setRawTrades(data);
+            const tradesList = Array.isArray(data) ? data : (Array.isArray(data?.data) ? data.data : []);
+            setRawTrades(tradesList);
         } catch (err) {
             console.error('Fetch closed error:', err);
+            setRawTrades([]);
         } finally {
             setLoading(false);
         }
@@ -49,6 +51,7 @@ const ClosedPositionsPage = () => {
 
     // Process main summary table data
     const processData = (trades) => {
+        if (!Array.isArray(trades)) return [];
         const groups = {};
         trades.forEach(t => {
             const sym = t.symbol;
@@ -100,6 +103,7 @@ const ClosedPositionsPage = () => {
 
     // Process breakdown detail data for a specific symbol
     const processDetails = (trades, symbol) => {
+        if (!Array.isArray(trades)) return [];
         const userGroups = {};
         trades.forEach(t => {
             const sym = t.symbol;
