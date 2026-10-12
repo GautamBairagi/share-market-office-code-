@@ -6,7 +6,7 @@ import { useAuth } from '../../context/AuthContext';
 import { useMarketData } from '../../context/MarketDataContext';
 import { displaySymbol } from '../../utils/marketUtils';
 
-const PAGE_SIZE = 20;
+const PAGE_SIZE = 50;
 
 let tradesPageCache = null;
 let tradesPageTotalCache = 0;
@@ -72,13 +72,13 @@ const TradesPage = ({ onCreateClick, onNavigate }) => {
     const [totalTrades, setTotalTrades] = useState(getInitialTotalTrades);
     const [loading, setLoading] = useState(() => initialTrades.length === 0);
     const [isRefreshing, setIsRefreshing] = useState(false);
-    const [isLoadingMore, setIsLoadingMore] = useState(false);
     const [selectedTrades, setSelectedTrades] = useState([]);
     const [deleteModal, setDeleteModal] = useState({ show: false, trade: null });
     const [deleting, setDeleting] = useState(false);
     const [currentPage, setCurrentPage] = useState(1);
 
     const fetchSeqRef = useRef(0);
+    const abortControllerRef = useRef(null);
 
     // Sorting state
     const [sortField, setSortField] = useState('id');
@@ -107,174 +107,126 @@ const TradesPage = ({ onCreateClick, onNavigate }) => {
         return map;
     }, [watchlistRows, cryptoData, forexData, commodityData]);
 
+    const pageCacheRef = useRef({});
+
     useEffect(() => {
-        const timer = setTimeout(() => fetchTrades(false), 300);
+        const timer = setTimeout(() => {
+            fetchTrades(currentPage, false);
+        }, 250);
         return () => clearTimeout(timer);
-    }, [filters.fromDate, filters.toDate, filters.id, filters.scrip, filters.userId]);
+    }, [currentPage, filters.fromDate, filters.toDate, filters.id, filters.scrip, filters.userId, filters.segment, sortField, sortDirection]);
 
-    const fetchTrades = async (showLoading = false) => {
+    const fetchTrades = async (pageToFetch = currentPage, showLoading = false) => {
         const currentFetchId = ++fetchSeqRef.current;
+        const cacheKey = `${pageToFetch}_${PAGE_SIZE}_${sortField}_${sortDirection}_${filters.segment}_${filters.scrip}_${filters.userId}_${filters.fromDate}_${filters.toDate}_${filters.id}`;
 
-        if (showLoading && trades.length === 0 && (!tradesPageCache || tradesPageCache.length === 0)) {
+        if (pageCacheRef.current[cacheKey]) {
+            const cached = pageCacheRef.current[cacheKey];
+            setTrades(cached.data);
+            setTotalTrades(cached.total);
+            setLoading(false);
+            setIsRefreshing(false);
+            return;
+        }
+
+        // Cancel previous pending network request if user clicks quickly
+        if (abortControllerRef.current) {
+            abortControllerRef.current.abort();
+        }
+        const controller = new AbortController();
+        abortControllerRef.current = controller;
+
+        if (showLoading && trades.length === 0) {
             setLoading(true);
         } else {
             setIsRefreshing(true);
         }
 
         try {
-            const backendFilters = {
-                fromDate: filters.fromDate,
-                toDate: filters.toDate,
-                id: filters.id,
-                scrip: filters.scrip,
-                username: filters.userId,
+            const params = {
+                page: pageToFetch,
+                limit: PAGE_SIZE,
+                sortBy: sortField,
+                sortOrder: sortDirection,
+                signal: controller.signal,
             };
+            if (filters.fromDate) params.fromDate = filters.fromDate;
+            if (filters.toDate) params.toDate = filters.toDate;
+            if (filters.id) params.id = filters.id;
+            if (filters.scrip) params.scrip = filters.scrip;
+            if (filters.userId) params.username = filters.userId;
+            if (filters.segment && filters.segment !== 'All') params.segment = filters.segment;
 
-            // Stage 1: Instant initial load of 50 items
-            const res1 = await getTrades({
-                ...backendFilters,
-                limit: 50,
-                offset: 0
-            });
+            const res = await getTrades(params);
             if (fetchSeqRef.current !== currentFetchId) return;
 
-            const list1 = Array.isArray(res1) ? res1 : (res1?.data || []);
-            const grandTotal = typeof res1?.total === 'number' ? res1.total : list1.length;
+            const list = Array.isArray(res) ? res : (res?.data || []);
+            const grandTotal = typeof res?.total === 'number' ? res.total : list.length;
 
+            pageCacheRef.current[cacheKey] = { data: list, total: grandTotal };
+            setTrades(list);
             setTotalTrades(grandTotal);
-            setTrades(list1);
-            setTradesPageCache(list1, grandTotal);
-            setLoading(false);
-            setIsRefreshing(false);
 
-            // Stage 2: Load next 500 items in background
-            if (list1.length >= 50 && grandTotal > 50) {
-                setIsLoadingMore(true);
-                const res2 = await getTrades({
-                    ...backendFilters,
-                    limit: 500,
-                    offset: 50
-                });
-                if (fetchSeqRef.current !== currentFetchId) return;
-
-                const list2 = Array.isArray(res2) ? res2 : (res2?.data || []);
-                let combined550 = list1;
-                if (list2.length > 0) {
-                    const seenIds = new Set(list1.map(t => t.id));
-                    const newItems2 = list2.filter(t => !seenIds.has(t.id));
-                    combined550 = [...list1, ...newItems2];
-                    setTrades(combined550);
-                    setTradesPageCache(combined550, grandTotal);
-                }
-
-                // Stage 3: Load all remaining data present in trades table
-                if (grandTotal > 550 || list2.length >= 500) {
-                    const remainingLimit = Math.max(50000, grandTotal - 550 + 1000);
-                    const res3 = await getTrades({
-                        ...backendFilters,
-                        limit: remainingLimit,
-                        offset: 550
-                    });
-                    if (fetchSeqRef.current !== currentFetchId) return;
-
-                    const list3 = Array.isArray(res3) ? res3 : (res3?.data || []);
-                    if (list3.length > 0) {
-                        const seenIds550 = new Set(combined550.map(t => t.id));
-                        const newItems3 = list3.filter(t => !seenIds550.has(t.id));
-                        const allCombined = [...combined550, ...newItems3];
-                        setTrades(allCombined);
-                        setTradesPageCache(allCombined, grandTotal);
-                    }
+            // Silent Background Pre-fetch for NEXT page (0ms network delay when navigating next)
+            const maxPages = Math.ceil(grandTotal / PAGE_SIZE);
+            if (pageToFetch < maxPages) {
+                const nextCacheKey = `${pageToFetch + 1}_${PAGE_SIZE}_${sortField}_${sortDirection}_${filters.segment}_${filters.scrip}_${filters.userId}_${filters.fromDate}_${filters.toDate}_${filters.id}`;
+                if (!pageCacheRef.current[nextCacheKey]) {
+                    getTrades({ ...params, page: pageToFetch + 1, signal: undefined }).then(nextRes => {
+                        if (fetchSeqRef.current === currentFetchId) {
+                            const nextList = Array.isArray(nextRes) ? nextRes : (nextRes?.data || []);
+                            pageCacheRef.current[nextCacheKey] = { data: nextList, total: grandTotal };
+                        }
+                    }).catch(() => {});
                 }
             }
         } catch (err) {
+            if (err?.name === 'CanceledError' || err?.name === 'AbortError' || err?.code === 'ERR_CANCELED') {
+                return;
+            }
             console.error('Failed to fetch trades:', err);
         } finally {
             if (fetchSeqRef.current === currentFetchId) {
                 setLoading(false);
                 setIsRefreshing(false);
-                setIsLoadingMore(false);
             }
         }
     };
 
     const handleSort = (field) => {
+        let newDir = 'asc';
         if (sortField === field) {
-            setSortDirection(prev => prev === 'asc' ? 'desc' : 'asc');
-        } else {
-            setSortField(field);
-            setSortDirection('asc');
+            newDir = sortDirection === 'asc' ? 'desc' : 'asc';
         }
+        pageCacheRef.current = {};
+        setSortField(field);
+        setSortDirection(newDir);
+        setCurrentPage(1);
     };
 
-    const filteredTrades = useMemo(() => {
+    // Client-side quick filter for remaining secondary inputs (buyRate, sellRate, lots)
+    const pagedTrades = useMemo(() => {
+        if (!filters.buyRate && !filters.sellRate && !filters.lots) return trades;
         return trades.filter(t => {
-            if (filters.id && !t.id.toString().includes(filters.id)) return false;
-            if (filters.scrip && !t.symbol?.toLowerCase().includes(filters.scrip.toLowerCase())) return false;
-            if (filters.segment !== 'All') {
-                const symbol = (t.symbol || t.scrip || '').toUpperCase();
-                const marketType = (t.market_type || '').toUpperCase();
-                if (filters.segment === 'MCX') {
-                    const mcx = ['GOLD','GOLDM','SILVER','SILVERM','CRUDEOIL','COPPER','NICKEL','ZINC','LEAD','ALUMINIUM','NATURALGAS'];
-                    if (!mcx.some(s => symbol.includes(s)) && marketType !== 'MCX') return false;
-                } else if (filters.segment === 'NSE') {
-                    const mcxExcl = ['GOLD','GOLDM','SILVER','SILVERM','CRUDEOIL','COPPER','NICKEL','ZINC','LEAD','ALUMINIUM','NATURALGAS'];
-                    if (mcxExcl.some(s => symbol.includes(s)) || marketType === 'MCX' || marketType === 'CRYPTO' || marketType === 'FOREX') return false;
-                } else if (filters.segment === 'CRYPTO') {
-                    if (marketType !== 'CRYPTO' && !symbol.startsWith('CRYPTO:')) return false;
-                } else if (filters.segment === 'FOREX') {
-                    if (marketType !== 'FOREX' && !symbol.startsWith('FOREX:')) return false;
-                }
-            }
-            if (filters.userId && !(t.username || '').toLowerCase().includes(filters.userId.toLowerCase()) && !t.user_id?.toString().includes(filters.userId)) return false;
-            if (filters.fromDate || filters.toDate) {
-                const tradeDate = new Date(t.entry_time).toISOString().split('T')[0];
-                if (filters.fromDate && tradeDate < filters.fromDate) return false;
-                if (filters.toDate && tradeDate > filters.toDate) return false;
-            }
+            if (filters.buyRate && t.type === 'BUY' && !String(t.entry_price).includes(filters.buyRate)) return false;
+            if (filters.sellRate && t.type === 'SELL' && !String(t.entry_price).includes(filters.sellRate)) return false;
+            if (filters.lots && !String(t.qty).includes(filters.lots)) return false;
             return true;
         });
-    }, [trades, filters]);
+    }, [trades, filters.buyRate, filters.sellRate, filters.lots]);
 
-    const sortedTrades = useMemo(() => {
-        let result = [...filteredTrades];
-        if (sortField) {
-            result.sort((a, b) => {
-                let valA = a[sortField] ?? '';
-                let valB = b[sortField] ?? '';
-
-                if (['id', 'qty', 'entry_price', 'exit_price', 'pnl', 'brokerage', 'user_id'].includes(sortField)) {
-                    valA = parseFloat(valA) || 0;
-                    valB = parseFloat(valB) || 0;
-                } else if (typeof valA === 'string') {
-                    valA = valA.toLowerCase();
-                    valB = String(valB).toLowerCase();
-                }
-
-                if (valA < valB) return sortDirection === 'asc' ? -1 : 1;
-                if (valA > valB) return sortDirection === 'asc' ? 1 : -1;
-                return 0;
-            });
-        }
-        return result;
-    }, [filteredTrades, sortField, sortDirection]);
-
-    const isClientOnlyFilter = (filters.segment && filters.segment !== 'All') || filters.buyRate || filters.sellRate || filters.lots;
-    const effectiveTotal = isClientOnlyFilter
-        ? filteredTrades.length
-        : Math.max(sortedTrades.length, totalTrades);
-
-    const totalPages = Math.max(1, Math.ceil(effectiveTotal / PAGE_SIZE));
+    const totalPages = Math.max(1, Math.ceil(totalTrades / PAGE_SIZE));
     const safePage = Math.min(currentPage, totalPages);
-    const pagedTrades = sortedTrades.slice((safePage - 1) * PAGE_SIZE, safePage * PAGE_SIZE);
 
     const handleFilterChange = (e) => {
         const { name, value } = e.target;
+        pageCacheRef.current = {};
         setFilters(prev => ({ ...prev, [name]: value }));
         setCurrentPage(1);
     };
 
     const handleReset = () => {
+        pageCacheRef.current = {};
         setFilters({ fromDate: '', toDate: '', id: '', scrip: '', segment: 'All', userId: '', buyRate: '', sellRate: '', lots: '' });
         setCurrentPage(1);
     };
@@ -283,11 +235,12 @@ const TradesPage = ({ onCreateClick, onNavigate }) => {
         setDeleting(true);
         try {
             await deleteTrade(deleteModal.trade.id);
+            pageCacheRef.current = {};
             const deletedId = deleteModal.trade.id;
             setDeleteModal({ show: false, trade: null });
             setTrades(prev => prev.filter(t => t.id !== deletedId));
             setTotalTrades(prev => Math.max(0, prev - 1));
-            fetchTrades();
+            fetchTrades(currentPage, false);
         } catch (err) {
             alert(err?.response?.data?.message || err?.message || 'Failed to delete');
         } finally {
@@ -300,11 +253,11 @@ const TradesPage = ({ onCreateClick, onNavigate }) => {
     };
 
     const handleExport = () => {
-        if (sortedTrades.length === 0) return alert('No trades to export');
+        if (pagedTrades.length === 0) return alert('No trades to export');
         const headers = ['ID', 'Scrip', 'Type', 'Username', 'Buy Rate', 'Sell Rate', 'Lots', 'Status', 'Entry Time'];
         const csvContent = [
             headers.join(','),
-            ...sortedTrades.map(t => [
+            ...pagedTrades.map(t => [
                 t.id, t.symbol, t.type, t.username,
                 t.type === 'BUY' ? t.entry_price : (t.exit_price || ''),
                 t.type === 'SELL' ? t.entry_price : (t.exit_price || ''),
@@ -314,7 +267,7 @@ const TradesPage = ({ onCreateClick, onNavigate }) => {
         const blob = new Blob([csvContent], { type: 'text/csv' });
         const link = document.createElement('a');
         link.href = URL.createObjectURL(blob);
-        link.download = 'trades_export.csv';
+        link.download = `trades_export_page_${safePage}.csv`;
         link.click();
     };
 
@@ -439,13 +392,12 @@ const TradesPage = ({ onCreateClick, onNavigate }) => {
                 {/* Table Header */}
                 <div className="px-5 py-3 bg-[#151d30] border-b border-white/5 flex items-center justify-between rounded-t-lg">
                     <span className="text-slate-400 text-xs">
-                        Showing <b className="text-white">{pagedTrades.length ? (safePage - 1) * PAGE_SIZE + 1 : 0}–{pagedTrades.length ? Math.min(safePage * PAGE_SIZE, effectiveTotal) : 0}</b> of <b className="text-white">{effectiveTotal}</b> items
+                        Showing <b className="text-white">{pagedTrades.length ? (safePage - 1) * PAGE_SIZE + 1 : 0}–{pagedTrades.length ? Math.min(safePage * PAGE_SIZE, totalTrades) : 0}</b> of <b className="text-white">{totalTrades.toLocaleString()}</b> items
                     </span>
                     <div className="flex items-center gap-3">
-                      
                         {isRefreshing && (
                             <span className="text-xs text-green-400 font-medium flex items-center gap-1.5 animate-pulse">
-                                <span className="w-2 h-2 rounded-full bg-green-400"></span> Updating...
+                                <span className="w-2 h-2 rounded-full bg-green-400"></span> Loading...
                             </span>
                         )}
                         {selectedTrades.length > 0 && (
@@ -582,10 +534,10 @@ const TradesPage = ({ onCreateClick, onNavigate }) => {
                             }) : (
                                 <tr>
                                     <td colSpan="12" className="px-6 py-12 text-center text-slate-500 italic" style={{ border: '1px solid rgba(255,255,255,0.06)' }}>
-                                        {isLoadingMore ? (
+                                        {loading || isRefreshing ? (
                                             <div className="flex flex-col items-center justify-center gap-2">
                                                 <div className="w-5 h-5 border-2 border-green-500 border-t-transparent rounded-full animate-spin"></div>
-                                                <span className="text-xs text-slate-400">Loading trades ({trades.length} of {effectiveTotal} loaded)...</span>
+                                                <span className="text-xs text-slate-400">Loading trades...</span>
                                             </div>
                                         ) : 'No trades found.'}
                                     </td>
