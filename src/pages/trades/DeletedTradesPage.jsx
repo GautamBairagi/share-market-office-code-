@@ -1,19 +1,33 @@
 import React, { useState, useEffect } from 'react';
 import { getTrades } from '../../services/api';
 import { displaySymbol } from '../../utils/marketUtils';
+import { ChevronLeft, ChevronRight } from 'lucide-react';
+
+const PAGE_SIZE = 15;
 
 const DeletedTradesPage = () => {
     const [filters, setFilters] = useState({ username: '' });
     const [tradesData, setTradesData] = useState([]);
+    const [total, setTotal] = useState(0);
+    const [currentPage, setCurrentPage] = useState(1);
+    const [totalPages, setTotalPages] = useState(1);
     const [loading, setLoading] = useState(true);
 
-    useEffect(() => { fetchTrades(); }, []);
+    useEffect(() => { fetchTrades({}, 1); }, []);
 
-    const fetchTrades = async (params = {}) => {
+    const fetchTrades = async (params = {}, page = currentPage) => {
         setLoading(true);
         try {
-            const data = await getTrades({ status: 'DELETED', ...params });
-            const mapped = data.map(t => ({
+            const queryParams = { status: 'DELETED', page, limit: PAGE_SIZE, ...params };
+            const res = await getTrades(queryParams);
+            const rows = Array.isArray(res) ? res : (res?.data || []);
+            const serverTotal = res?.total ?? rows.length;
+            const serverTotalPages = res?.totalPages ?? Math.max(1, Math.ceil(serverTotal / PAGE_SIZE));
+            setTotal(serverTotal);
+            setTotalPages(serverTotalPages);
+            setCurrentPage(page);
+
+            const mapped = rows.map(t => ({
                 id: t.id,
                 scrip: displaySymbol(t.symbol),
                 segment: t.segment || 'MCX',
@@ -28,7 +42,6 @@ const DeletedTradesPage = () => {
                 buyIp: t.trade_ip || t.buy_ip,
                 sellIp: t.sell_ip || t.close_ip,
             }));
-            mapped.sort((a, b) => b.id - a.id);
             setTradesData(mapped);
         } catch (err) {
             console.error('Failed to fetch deleted trades:', err);
@@ -42,15 +55,39 @@ const DeletedTradesPage = () => {
         setFilters(prev => ({ ...prev, [name]: value }));
     };
 
-    const handleSearch = () => fetchTrades(filters);
+    const handleSearch = () => fetchTrades(filters, 1);
 
     const handleReset = () => {
         setFilters({ username: '' });
-        fetchTrades();
+        fetchTrades({}, 1);
     };
 
+    const handlePageChange = (page) => {
+        fetchTrades(filters, page);
+    };
+
+    const getPaginationPages = () => {
+        const pages = [];
+        const maxVisible = 5;
+        if (totalPages <= maxVisible) {
+            for (let i = 1; i <= totalPages; i++) pages.push(i);
+        } else {
+            pages.push(1);
+            if (currentPage > 3) pages.push('...');
+            const start = Math.max(2, currentPage - 1);
+            const end = Math.min(totalPages - 1, currentPage + 1);
+            for (let i = start; i <= end; i++) pages.push(i);
+            if (currentPage < totalPages - 2) pages.push('...');
+            pages.push(totalPages);
+        }
+        return pages;
+    };
+
+    const rangeStart = total === 0 ? 0 : (currentPage - 1) * PAGE_SIZE + 1;
+    const rangeEnd = total === 0 ? 0 : rangeStart + tradesData.length - 1;
+
     return (
-        <div className="flex flex-col h-full bg-[#1a2035] space-y-4 md:space-y-8 overflow-y-auto px-3 sm:px-4 md:px-6 py-3 sm:py-4">
+        <div className="flex flex-col flex-1 min-h-0 bg-[#1a2035] gap-4 md:gap-6 overflow-hidden px-3 sm:px-4 md:px-6 py-3 sm:py-4">
 
             {/* Filter Card */}
             <div className="bg-[#1f283e] p-4 sm:p-6 rounded-lg border border-white/10 shadow-xl">
@@ -86,18 +123,16 @@ const DeletedTradesPage = () => {
             </div>
 
             {/* Results Section */}
-            <div className="bg-[#1f283e] rounded-lg border border-white/10 shadow-xl overflow-hidden">
-                {/* Showing items count */}
-                <div className="px-6 py-4 bg-[#1a2035] border-b border-white/10">
+            <div className="bg-[#1f283e] rounded-lg border border-white/10 shadow-xl overflow-hidden flex flex-col flex-1 min-h-0">
+                <div className="px-6 py-4 bg-[#1a2035] border-b border-white/10 shrink-0">
                     <span className="text-slate-400 text-sm">
-                        {loading ? 'Loading...' : <>Showing <b className="text-white">{tradesData.length}</b> items.</>}
+                        {loading ? 'Loading...' : <>Showing <b className="text-white">{rangeStart}–{rangeEnd}</b> of <b className="text-white">{total}</b> items.</>}
                     </span>
                 </div>
 
-                {/* Table */}
-                <div className="overflow-x-auto">
+                <div className="overflow-auto flex-1 min-h-0 custom-scrollbar">
                     <table className="w-full text-left border-collapse custom-table">
-                        <thead>
+                        <thead className="sticky top-0 z-10">
                             <tr className="text-white text-sm bg-[#1a2035] border-b border-white/10">
                                 <th className="px-4 py-4 font-bold whitespace-nowrap">ID ↑</th>
                                 <th className="px-4 py-4 font-bold whitespace-nowrap">Scrip</th>
@@ -144,6 +179,44 @@ const DeletedTradesPage = () => {
                             )}
                         </tbody>
                     </table>
+                </div>
+
+                {/* Pagination */}
+                <div className="px-5 py-4 border-t border-white/5 bg-[#151d30] flex items-center justify-between gap-3 flex-wrap shrink-0">
+                    <span className="text-xs text-slate-500">Page {currentPage} of {totalPages} (Total: {total})</span>
+                    <div className="flex items-center gap-1.5">
+                        <button
+                            onClick={() => handlePageChange(Math.max(1, currentPage - 1))}
+                            disabled={currentPage === 1}
+                            className="w-8 h-8 flex items-center justify-center rounded bg-white/5 hover:bg-white/10 text-slate-400 hover:text-white disabled:opacity-30 disabled:cursor-not-allowed transition-all"
+                        >
+                            <ChevronLeft className="w-4 h-4" />
+                        </button>
+                        {getPaginationPages().map((page, idx) =>
+                            page === '...' ? (
+                                <span key={`ellipsis-${idx}`} className="w-8 h-8 flex items-center justify-center text-slate-500 text-xs">…</span>
+                            ) : (
+                                <button
+                                    key={page}
+                                    onClick={() => handlePageChange(page)}
+                                    className={`w-8 h-8 flex items-center justify-center rounded text-xs font-bold transition-all ${
+                                        currentPage === page
+                                            ? 'bg-[#4CAF50] text-white shadow-lg shadow-green-900/30'
+                                            : 'bg-white/5 hover:bg-white/10 text-slate-400 hover:text-white'
+                                    }`}
+                                >
+                                    {page}
+                                </button>
+                            )
+                        )}
+                        <button
+                            onClick={() => handlePageChange(Math.min(totalPages, currentPage + 1))}
+                            disabled={currentPage === totalPages}
+                            className="w-8 h-8 flex items-center justify-center rounded bg-white/5 hover:bg-white/10 text-slate-400 hover:text-white disabled:opacity-30 disabled:cursor-not-allowed transition-all"
+                        >
+                            <ChevronRight className="w-4 h-4" />
+                        </button>
+                    </div>
                 </div>
             </div>
         </div>

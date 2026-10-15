@@ -7,7 +7,7 @@ import AccountsPage from './pages/accounts/AccountsPage';
 import BrokerAccountsPage from './pages/accounts/BrokerAccountsPage';
 import BannedLimitOrdersPage from './pages/banned/BannedLimitOrdersPage';
 import BankDetailsPage from './pages/bank/BankDetailsPage';
-import TradesPage from './pages/trades/TradesPage';
+import TradesPage, { clearTradesCache } from './pages/trades/TradesPage';
 import TickersPage from './pages/tickers/TickersPage';
 import LiveM2MPage from './pages/dashboard/LiveM2MPage';
 import KiteDashboard from './pages/dashboard/KiteDashboard';
@@ -41,6 +41,7 @@ import DepositRequestsPage from './pages/requests/DepositRequestsPage';
 import WithdrawalRequestsPage from './pages/requests/WithdrawalRequestsPage';
 import NegativeBalanceTxnsPage from './pages/transactions/NegativeBalanceTxnsPage';
 import PendingOrdersPage from './pages/orders/PendingOrdersPage';
+import ScripDataPage from './pages/data/ScripDataPage';
 import UsersPage from './pages/users/UsersPage';
 import CreateFundForm from './components/CreateFundForm';
 import AddBrokerForm from './components/AddBrokerForm';
@@ -108,7 +109,6 @@ function App() {
             sessionStorage.removeItem('selectedClient');
         }
     }, [selectedClient]);
-    const [clients, setClients] = useState([]);
     const [trades, setTrades] = useState([]);
     const [loading, setLoading] = useState(true);
     const [toast, setToast] = useState({ message: '', type: 'success' });
@@ -223,19 +223,10 @@ function App() {
     };
 
     const fetchInitialData = async () => {
-        setLoading(true);
-        try {
-            const [clientsData, tradesData] = await Promise.all([
-                api.getClients(),
-                api.getTrades()
-            ]);
-            setClients(clientsData || []);
-            setTrades(tradesData || []);
-        } catch (err) {
-            console.error('Initial fetch failed:', err);
-        } finally {
-            setLoading(false);
-        }
+        // Trades and client pages load their own pages. Pulling every trade
+        // here froze the admin app once history reached lakhs of rows.
+        setTrades([]);
+        setLoading(false);
     };
 
     const handleActionSuccess = async (message, redirectTo = 'trading-clients') => {
@@ -243,10 +234,8 @@ function App() {
         // So the page mounts with cache already ready — no loading spinner
         if (redirectTo === 'trading-clients') {
             try {
-                const data = await api.getClients({ role: 'TRADER', page: 1, limit: 50, paginate: 'true' });
-                const list = data?.users || (Array.isArray(data) ? data : []);
-                const total = data?.total !== undefined ? data.total : list.length;
-                setTradingClientsCache(list, total);
+                const data = await api.getClients({ role: 'TRADER', page: 1, limit: 15 });
+                setTradingClientsCache(data);
             } catch (err) {
                 // If prefetch fails, clear cache so page fetches fresh on mount
                 clearTradingClientsCache();
@@ -261,6 +250,7 @@ function App() {
             console.log('[App.handleAddTrade] Received data:', newTradeData);
             console.log('[App.handleAddTrade] Calling api.createTrade with:', JSON.stringify(newTradeData));
             await api.createTrade(newTradeData);
+            clearTradesCache();
             fetchInitialData();
             setView('trades');
             setToast({ message: 'Trade placed successfully!', type: 'success' });
@@ -465,7 +455,7 @@ function App() {
                     <Route path="/negative-balance" element={<ProtectedRoute viewId="negative-balance"><NegativeBalanceTxnsPage /></ProtectedRoute>} />
 
                     <Route path="/pending-orders/*" element={<ProtectedRoute viewId="pending-orders"><PendingOrdersPage /></ProtectedRoute>} />
-                    <Route path="/scrip-data" element={<Navigate to="/script-data" replace />} />
+                    <Route path="/scrip-data" element={<ProtectedRoute viewId="scrip-data"><ScripDataPage /></ProtectedRoute>} />
                     <Route path="/group-trades" element={<ProtectedRoute viewId="group-trades"><GroupTradesPage /></ProtectedRoute>} />
                     <Route path="/global-updation" element={<ProtectedRoute viewId="global-updation"><GlobalUpdationPage /></ProtectedRoute>} />
                     <Route path="/theme-settings" element={<ProtectedRoute viewId="theme-settings"><ThemeSettingsPage /></ProtectedRoute>} />

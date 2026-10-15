@@ -51,60 +51,9 @@ const ActivePositionsPage = () => {
     const fetchSymbolDetails = async (symbol) => {
         setDetailLoading(true);
         try {
-            const { getTrades } = await import('../../services/api');
-            const trades = await getTrades({ scrip: symbol });
-            
-            const groups = {};
-            trades.forEach(t => {
-                // Exact symbol match check and active status check
-                if (t.symbol.toUpperCase() !== symbol.toUpperCase()) return;
-                if (t.status !== 'OPEN' && t.status !== 'HOLD') return;
-                if (t.is_pending) return;
-                
-                const isHold = t.status === 'HOLD' || t.is_carried_forward === 1;
-                const status = isHold ? 'HOLD' : 'OPEN';
-                const uid = t.user_id;
-                const key = `${uid}_${status}`;
-
-                if (!groups[key]) {
-                    groups[key] = {
-                        key,
-                        userId: uid,
-                        username: t.username || 'N/A',
-                        fullName: t.full_name || 'N/A',
-                        status: status,
-                        lotSize: parseFloat(t.lot_size || 1),
-                        activeBuyLots: 0,
-                        activeSellLots: 0,
-                        activeBuy: 0,
-                        activeSell: 0,
-                        totalValue: 0,
-                        totalQtyForAvg: 0
-                    };
-                }
-                const lotsQty = parseFloat(t.qty_input != null ? t.qty_input : t.qty || 0);
-                const actualQty = parseFloat(t.actual_qty != null ? t.actual_qty : t.qty || 0);
-                const entryPrice = parseFloat(t.entry_price || 0);
-
-                if (t.type === 'BUY') {
-                    groups[key].activeBuyLots += lotsQty;
-                    groups[key].activeBuy += actualQty;
-                } else if (t.type === 'SELL') {
-                    groups[key].activeSellLots += lotsQty;
-                    groups[key].activeSell += actualQty;
-                }
-                groups[key].totalValue += (entryPrice * actualQty);
-                groups[key].totalQtyForAvg += actualQty;
-            });
-
-            const rows = Object.values(groups).map(g => ({
-                ...g,
-                avgPrice: g.totalQtyForAvg > 0 ? (g.totalValue / g.totalQtyForAvg) : 0,
-                overallActiveLots: g.activeBuyLots - g.activeSellLots,
-                overallActive: g.activeBuy - g.activeSell
-            }));
-            
-            setSymbolDetails(rows);
+            const { getActivePositionDetails } = await import('../../services/api');
+            const rows = await getActivePositionDetails(symbol);
+            setSymbolDetails(Array.isArray(rows) ? rows : []);
         } catch (err) {
             console.error('Fetch symbol details error:', err);
         } finally {

@@ -395,34 +395,61 @@ const PendingOrdersPage = () => {
 
 
     useEffect(() => {
-        fetchData();
-        // Polling every 2 seconds as requested
-        const interval = setInterval(() => {
-            fetchData(filters, true); 
-        }, 2000);
-        return () => clearInterval(interval);
-    }, [filters]);
+        let cancelled = false;
+        (async () => {
+            try {
+                const [userData, contractsRes] = await Promise.all([
+                    api.getClients({ role: 'TRADER', lite: 1 }),
+                    api.getSelectedContracts()
+                ]);
+                if (cancelled) return;
+                setUsers(Array.isArray(userData) ? userData : (userData?.data || []));
+                if (contractsRes && Array.isArray(contractsRes)) {
+                    setAllowedContracts(new Set(contractsRes));
+                }
+            } catch (err) {
+                console.error(err);
+            }
+        })();
+        return () => { cancelled = true; };
+    }, []);
 
     const fetchData = async (filterParams = {}, silent = false) => {
         if (!silent) setLoading(true);
         try {
-            const [userData, orders, contractsRes] = await Promise.all([
-                api.getClients({ role: 'TRADER' }),
-                api.getTrades({ status: 'OPEN', is_pending: 1, ...filterParams }),
-                api.getSelectedContracts()
-            ]);
-
-            setUsers(userData);
-            setPendingOrders(orders);
-            if (contractsRes && Array.isArray(contractsRes)) {
-                setAllowedContracts(new Set(contractsRes));
-            }
+            const orders = await api.getTrades({ status: 'OPEN', is_pending: 1, ...filterParams });
+            setPendingOrders(Array.isArray(orders) ? orders : (orders?.data || []));
         } catch (err) {
             console.error(err);
         } finally {
             if (!silent) setLoading(false);
         }
     };
+
+    const filtersRef = useRef(filters);
+    filtersRef.current = filters;
+    const fetchRef = useRef(fetchData);
+    fetchRef.current = fetchData;
+
+    useEffect(() => {
+        let stopped = false;
+        let running = false;
+        const run = async (silent) => {
+            if (running) return;
+            running = true;
+            try {
+                if (!stopped) await fetchRef.current(filtersRef.current, silent);
+            } finally {
+                running = false;
+            }
+        };
+        run(false);
+        const interval = setInterval(() => run(true), 2000);
+        return () => {
+            stopped = true;
+            clearInterval(interval);
+        };
+    }, []);
 
     const handleFilterChange = (e) => {
         const { name, value } = e.target;

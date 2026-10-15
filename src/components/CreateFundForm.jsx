@@ -19,8 +19,8 @@ const CreateFundForm = ({ onSave, onBack, mode = 'deposit', initialUser }) => {
     transactionPassword: '',
     transactionType: effectiveUser?._fundType ? effectiveUser._fundType.toLowerCase() : (mode || 'deposit')
   });
-  
-  const [users, setUsers] = useState([]);
+
+  const [users, setUsers] = useState(() => (effectiveUser?.id && effectiveUser?.username ? [effectiveUser] : []));
   const [loading, setLoading] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [toast, setToast] = useState({ show: false, type: '', text: '' });
@@ -42,23 +42,29 @@ const CreateFundForm = ({ onSave, onBack, mode = 'deposit', initialUser }) => {
     });
   }, [effectiveUser, mode]);
 
-  // Ensure effectiveUser is in the users list if provided
+  // Ensure effectiveUser is always available in the users options list
   useEffect(() => {
-    if (effectiveUser?.id && users.length > 0) {
-      const userExists = users.find(u => u.id === effectiveUser.id);
-      if (!userExists && effectiveUser.username) {
-        console.log('[CreateFundForm] Adding effectiveUser to options:', effectiveUser);
-        setUsers(prev => [...prev, effectiveUser]);
-      }
+    if (effectiveUser?.id && effectiveUser?.username) {
+      setUsers(prev => {
+        const exists = prev.some(u => String(u.id) === String(effectiveUser.id));
+        return exists ? prev : [effectiveUser, ...prev];
+      });
     }
-  }, [effectiveUser, users]);
+  }, [effectiveUser]);
 
 
   const fetchUsers = async () => {
     setLoading(true);
     try {
-      const data = await api.getClients();
-      setUsers(Array.isArray(data) ? data.filter(u => u.role === 'TRADER') : []);
+      const data = await api.getClients({ role: 'TRADER', lite: 1 });
+      const clientList = Array.isArray(data) ? data : (data?.data || []);
+      const traderList = clientList.filter(u => !u.role || u.role === 'TRADER');
+      setUsers(prev => {
+        if (effectiveUser?.id && !traderList.some(u => String(u.id) === String(effectiveUser.id))) {
+          return [effectiveUser, ...traderList];
+        }
+        return traderList;
+      });
     } catch (err) {
       console.error('Failed to fetch users', err);
     } finally {
@@ -93,7 +99,7 @@ const CreateFundForm = ({ onSave, onBack, mode = 'deposit', initialUser }) => {
     e.preventDefault();
     setFormError('');
     if (!formData.userId) { setFormError('Please select a user'); return; }
-    
+
     const parsedAmount = parseFloat(formData.amount);
     if (!formData.amount || isNaN(parsedAmount) || parsedAmount <= 0) {
       setFormError('Please enter a valid amount greater than 0');
@@ -135,12 +141,11 @@ const CreateFundForm = ({ onSave, onBack, mode = 'deposit', initialUser }) => {
     <div className="w-full bg-[#1a2035] font-sans relative pb-24 sm:pb-12">
       {/* Toast Notification */}
       {toast.show && (
-          <div className={`fixed top-6 right-6 z-[100] flex items-center gap-3 px-6 py-4 rounded shadow-2xl transition-all border ${
-              toast.type === 'success' ? 'bg-[#1b2a21] border-green-500/30 text-green-400' : 'bg-[#2a1b1b] border-red-500/30 text-red-400'
+        <div className={`fixed top-6 right-6 z-[100] flex items-center gap-3 px-6 py-4 rounded shadow-2xl transition-all border ${toast.type === 'success' ? 'bg-[#1b2a21] border-green-500/30 text-green-400' : 'bg-[#2a1b1b] border-red-500/30 text-red-400'
           }`}>
-              {toast.type === 'success' ? <CheckCircle className="w-5 h-5" /> : <AlertCircle className="w-5 h-5" />}
-              <p className="text-[14px] font-medium tracking-wide">{toast.text}</p>
-          </div>
+          {toast.type === 'success' ? <CheckCircle className="w-5 h-5" /> : <AlertCircle className="w-5 h-5" />}
+          <p className="text-[14px] font-medium tracking-wide">{toast.text}</p>
+        </div>
       )}
 
       <div className="max-w-6xl mx-auto pt-0">
@@ -197,7 +202,7 @@ const CreateFundForm = ({ onSave, onBack, mode = 'deposit', initialUser }) => {
                     <option value="withdraw" className="font-bold">WITHDRAW (WD)</option>
                   </select>
                   <div className="absolute right-3 top-[34px] pointer-events-none text-black">
-                     <ChevronDown className="w-4 h-4" />
+                    <ChevronDown className="w-4 h-4" />
                   </div>
                 </div>
               </div>

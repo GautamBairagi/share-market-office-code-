@@ -1,249 +1,244 @@
 import React, { useState, useEffect, useLayoutEffect, useRef } from 'react';
-import { RotateCcw, SquarePen, ArrowUp, ArrowDown, Eye, Copy, Trash2, Settings, FileText } from 'lucide-react';
+import { RotateCcw, SquarePen, ArrowUp, ArrowDown, Eye, Copy, Trash2, Settings, FileText, ChevronLeft, ChevronRight } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { useBrokerPermissions } from '../../hooks/useBrokerPermissions';
 import * as api from '../../services/api';
 import Toast from '../../components/common/Toast';
 import * as XLSX from 'xlsx';
+// Module-level in-memory cache and in-flight promise tracker (0ms page switching in RAM)
+const tradingClientsPageCache = new Map();
+const prefetchInFlight = new Map();
 
-let tradingClientsCache = null;
-let tradingClientsTotalCache = null;
+const makeCacheKey = (pageOrRole, page, search, status, from, to) => {
+    const actualPage = typeof pageOrRole === 'number' ? pageOrRole : page;
+    const actualSearch = typeof pageOrRole === 'number' ? page : search;
+    const actualStatus = typeof pageOrRole === 'number' ? search : status;
+    const actualFrom = typeof pageOrRole === 'number' ? status : from;
+    const actualTo = typeof pageOrRole === 'number' ? from : to;
+    return `TRADER_p${actualPage || 1}_s${actualSearch || ''}_st${actualStatus || ''}_f${actualFrom || ''}_t${actualTo || ''}`;
+};
 
 export const clearTradingClientsCache = () => {
-    tradingClientsCache = null;
-    tradingClientsTotalCache = null;
-    try {
-        sessionStorage.removeItem('tc_clients_cache');
-        sessionStorage.removeItem('tc_clients_total');
-        localStorage.removeItem('tc_clients_cache');
-        localStorage.removeItem('tc_clients_total');
-    } catch (e) { }
+    tradingClientsPageCache.clear();
+    prefetchInFlight.clear();
 };
 
-export const setTradingClientsCache = (data, total = null) => {
-    if (data && !Array.isArray(data) && Array.isArray(data.users)) {
-        if (total === null || total === undefined) total = data.total;
-        data = data.users;
-    }
-    tradingClientsCache = data;
-    if (total !== null && total !== undefined && !isNaN(Number(total))) {
-        tradingClientsTotalCache = Number(total);
-    }
-    try {
-        if (data) {
-            const dataStr = JSON.stringify(data);
-            sessionStorage.setItem('tc_clients_cache', dataStr);
-            localStorage.setItem('tc_clients_cache', dataStr);
-        }
-        if (total !== null && total !== undefined && !isNaN(Number(total))) {
-            const totalStr = String(total);
-            sessionStorage.setItem('tc_clients_total', totalStr);
-            localStorage.setItem('tc_clients_total', totalStr);
-        }
-    } catch (e) { }
+export const setTradingClientsCache = (data, page = 1, total = null, totalPages = null) => {
+    const list = Array.isArray(data) ? data : (data?.data || []);
+    const calcTotal = total ?? (data?.total ?? list.length);
+    const calcTotalPages = totalPages ?? (data?.totalPages ?? Math.max(1, Math.ceil(calcTotal / PAGE_SIZE)));
+    const key = makeCacheKey('TRADER', page, '', '', '', '');
+    tradingClientsPageCache.set(key, {
+        data: list,
+        total: calcTotal,
+        totalPages: calcTotalPages,
+        timestamp: Date.now()
+    });
 };
 
-const getInitialClients = () => {
-    if (tradingClientsCache && Array.isArray(tradingClientsCache) && tradingClientsCache.length > 0) {
-        return tradingClientsCache;
-    }
-    try {
-        const stored = sessionStorage.getItem('tc_clients_cache') || localStorage.getItem('tc_clients_cache');
-        if (stored) {
-            const parsed = JSON.parse(stored);
-            if (Array.isArray(parsed) && parsed.length > 0) {
-                tradingClientsCache = parsed;
-                return parsed;
-            }
-        }
-    } catch (e) { }
-    return [];
-};
-
-const getInitialTotalClients = () => {
-    if (typeof tradingClientsTotalCache === 'number' && tradingClientsTotalCache > 0) {
-        return tradingClientsTotalCache;
-    }
-    try {
-        const stored = sessionStorage.getItem('tc_clients_total') || localStorage.getItem('tc_clients_total');
-        if (stored) {
-            const num = parseInt(stored, 10);
-            if (!isNaN(num) && num > 0) {
-                tradingClientsTotalCache = num;
-                return num;
-            }
-        }
-    } catch (e) { }
-    return 0;
-};
+const PAGE_SIZE = 15;
 
 const TradingClientsPage = ({ onDepositClick, onWithdrawClick, onLogout, onNavigate }) => {
     const { isSuperAdmin, isAdmin, isBroker, user } = useAuth();
     const { permissions } = useBrokerPermissions(user?.userId, user?.role);
-
-    const initialClients = getInitialClients();
-    const initialTotal = getInitialTotalClients();
-    const [clients, setClients] = useState(initialClients);
-    const [totalClients, setTotalClients] = useState(initialTotal);
-    const [itemsPerPage, setItemsPerPage] = useState(50);
-    const [loading, setLoading] = useState(() => initialClients.length === 0);
-    const [isRefreshing, setIsRefreshing] = useState(false);
+    const [clients, setClients] = useState([]);
+    const [total, setTotal] = useState(0);
+    const [currentPage, setCurrentPage] = useState(1);
+    const [totalPages, setTotalPages] = useState(1);
+    const [loading, setLoading] = useState(true);
+    const [isPageChanging, setIsPageChanging] = useState(false);
     const [searchTerm, setSearchTerm] = useState('');
     const [statusFilter, setStatusFilter] = useState('');
     const [fromDate, setFromDate] = useState('');
     const [toDate, setToDate] = useState('');
-    const [currentPage, setCurrentPage] = useState(1);
     const [toast, setToast] = useState({ message: '', type: 'success' });
     const [deleteConfirm, setDeleteConfirm] = useState(null); // holds client to be deleted
 
-    // Fast Page Cache for 0ms transitions
-    const pageCacheRef = useRef({});
-
-    // Sorting state
-    const [sortField, setSortField] = useState('full_name');
-    const [sortDirection, setSortDirection] = useState('asc');
-
     const scrollContainerRef = useRef(null);
 
-    const fetchClients = async (pageToFetch = currentPage, showLoading = false) => {
-        const cacheKey = `${pageToFetch}_${itemsPerPage}_${searchTerm}_${statusFilter}_${fromDate}_${toDate}`;
+    // Silent background pre-fetcher for any target page (ensures 0ms instant click on hover)
+    const silentPrefetch = async (targetPage, maxPages) => {
+        if (!targetPage || targetPage < 1 || (maxPages && targetPage > maxPages)) return;
+        const key = makeCacheKey(user?.role, targetPage, searchTerm, statusFilter, fromDate, toDate);
+        if (tradingClientsPageCache.has(key)) return tradingClientsPageCache.get(key);
+        if (prefetchInFlight.has(key)) return prefetchInFlight.get(key);
 
-        // Fast Instant Cache Read (0ms lag)
-        if (pageCacheRef.current[cacheKey]) {
-            const cached = pageCacheRef.current[cacheKey];
-            setClients(cached.users);
-            setTotalClients(cached.total);
+        const fetchPromise = (async () => {
+            try {
+                const params = { role: 'TRADER', page: targetPage, limit: PAGE_SIZE };
+                if (fromDate) params.fromDate = fromDate;
+                if (toDate) params.toDate = toDate;
+                if (searchTerm) params.search = searchTerm;
+                if (statusFilter) params.status = statusFilter;
+
+                const res = await api.getClients(params);
+                const list = Array.isArray(res) ? res : (res?.data || []);
+                const sTotal = res?.total ?? list.length;
+                const sTotalPages = res?.totalPages ?? Math.max(1, Math.ceil(sTotal / PAGE_SIZE));
+
+                const payload = {
+                    data: list,
+                    total: sTotal,
+                    totalPages: sTotalPages,
+                    timestamp: Date.now()
+                };
+                tradingClientsPageCache.set(key, payload);
+                return payload;
+            } catch {
+                return null;
+            } finally {
+                prefetchInFlight.delete(key);
+            }
+        })();
+
+        prefetchInFlight.set(key, fetchPromise);
+        return fetchPromise;
+    };
+
+    // Staggered background pre-fetcher for visible / adjacent pagination window
+    const prefetchBatch = (pages, maxPages) => {
+        if (!Array.isArray(pages)) return;
+        pages.forEach((p, idx) => {
+            if (typeof p === 'number' && p > 0 && (!maxPages || p <= maxPages)) {
+                setTimeout(() => silentPrefetch(p, maxPages), idx * 45);
+            }
+        });
+    };
+
+    const fetchClients = async (showLoading = false, page = currentPage, isPageChange = false) => {
+        const key = makeCacheKey(user?.role, page, searchTerm, statusFilter, fromDate, toDate);
+        const cached = tradingClientsPageCache.get(key);
+
+        // If page already in RAM cache, instant 0ms mount!
+        if (cached && cached.data) {
+            setClients(cached.data);
+            setTotal(cached.total);
+            setTotalPages(cached.totalPages);
+            setCurrentPage(page);
+            setLoading(false);
+            setIsPageChanging(false);
+
+            // Silently pre-fetch adjacent window (next 2 pages and previous)
+            prefetchBatch([page + 1, page + 2, page - 1], cached.totalPages);
             return;
         }
 
-        if (showLoading && clients.length === 0 && (!tradingClientsCache || tradingClientsCache.length === 0)) {
-            setLoading(true);
-        } else if (pageToFetch !== 1 || searchTerm || statusFilter || fromDate || toDate || clients.length === 0 || totalClients === 0) {
-            setIsRefreshing(true);
+        if (showLoading) {
+            if (isPageChange && clients.length > 0) {
+                setIsPageChanging(true);
+            } else {
+                setLoading(true);
+            }
         }
 
         try {
-            console.log(`[TradingClientsPage] Fetching page ${pageToFetch} (${itemsPerPage}/page) for ${user?.role}`);
-            const params = {
-                role: 'TRADER',
-                page: pageToFetch,
-                limit: itemsPerPage,
-                paginate: 'true'
-            };
-            if (searchTerm && searchTerm.trim()) params.search = searchTerm.trim();
-            if (statusFilter === '1') params.status = 'Active';
-            if (statusFilter === '0') params.status = 'Inactive';
+            console.log(`[TradingClientsPage] Fetching clients for ${user?.role} (ID: ${user?.userId}) - Page ${page}`);
+            const params = { role: 'TRADER', page, limit: PAGE_SIZE };
             if (fromDate) params.fromDate = fromDate;
             if (toDate) params.toDate = toDate;
+            if (searchTerm) params.search = searchTerm;
+            if (statusFilter) params.status = statusFilter;
 
-            const data = await api.getClients(params);
-            const list = data?.users || (Array.isArray(data) ? data : []);
-            const total = data?.total !== undefined ? data.total : (totalClients || list.length);
+            const res = await api.getClients(params);
+            const list = Array.isArray(res) ? res : (res?.data || []);
+            const serverTotal = res?.total ?? list.length;
+            const serverTotalPages = res?.totalPages ?? Math.max(1, Math.ceil(serverTotal / PAGE_SIZE));
 
-            // Save to fast in-memory page cache
-            pageCacheRef.current[cacheKey] = { users: list, total };
+            // Save to in-memory RAM cache
+            tradingClientsPageCache.set(key, {
+                data: list,
+                total: serverTotal,
+                totalPages: serverTotalPages,
+                timestamp: Date.now()
+            });
 
-            // Save to persistent cache when on default initial view
-            const isDefaultView = !searchTerm && !statusFilter && !fromDate && !toDate && pageToFetch === 1;
-            if (isDefaultView) {
-                setTradingClientsCache(list, total);
-            }
-
+            setTotal(serverTotal);
+            setTotalPages(serverTotalPages);
+            setCurrentPage(page);
             setClients(list);
-            setTotalClients(total);
 
-            // Silent Background Pre-fetch for NEXT page (Zero lag when clicking Next)
-            const maxPages = Math.ceil(total / itemsPerPage);
-            if (pageToFetch < maxPages) {
-                const nextCacheKey = `${pageToFetch + 1}_${itemsPerPage}_${searchTerm}_${statusFilter}_${fromDate}_${toDate}`;
-                if (!pageCacheRef.current[nextCacheKey]) {
-                    api.getClients({ ...params, page: pageToFetch + 1 })
-                        .then(nextData => {
-                            const nextList = nextData?.users || (Array.isArray(nextData) ? nextData : []);
-                            const nextTotal = nextData?.total !== undefined ? nextData.total : total;
-                            pageCacheRef.current[nextCacheKey] = { users: nextList, total: nextTotal };
-                        })
-                        .catch(() => { });
-                }
-            }
+            // Pre-fetch lookahead window in background
+            const lookahead = [page + 1, page + 2, page - 1].filter(p => p > 0 && p <= serverTotalPages);
+            prefetchBatch(lookahead, serverTotalPages);
         } catch (err) {
             console.error('[TradingClientsPage] ❌ Failed to fetch clients:', err);
             setToast({ message: `Error loading clients: ${err.message}`, type: 'error' });
         } finally {
             setLoading(false);
-            setIsRefreshing(false);
+            setIsPageChanging(false);
         }
     };
 
     useEffect(() => {
-        fetchClients(currentPage);
-    }, [user?.userId, currentPage, itemsPerPage]);
+        fetchClients(true, 1);
+    }, [user?.userId, searchTerm, statusFilter, fromDate, toDate]);
 
-    // When filters change, reset page to 1 and clear cache
-    useEffect(() => {
-        pageCacheRef.current = {};
-        setCurrentPage(1);
-        fetchClients(1, true);
-    }, [searchTerm, statusFilter, fromDate, toDate]);
+    const handlePageChange = async (page) => {
+        if (page === currentPage || page < 1 || page > totalPages) return;
+        const key = makeCacheKey(user?.role, page, searchTerm, statusFilter, fromDate, toDate);
+        const cached = tradingClientsPageCache.get(key);
 
-    // Restore scroll position before paint and attach scroll listener
-    useLayoutEffect(() => {
-        const el = scrollContainerRef.current;
-        if (!el) return;
+        // ⚡ Optimistic visual highlight: immediately switch active button to target page (0ms)
+        setCurrentPage(page);
 
-        const savedScroll = sessionStorage.getItem('tradingClientsScrollPos');
-        if (savedScroll) {
-            el.scrollTop = parseInt(savedScroll, 10);
+        if (cached && cached.data) {
+            // ⚡ 0ms INSTANT transition from memory!
+            setClients(cached.data);
+            setTotal(cached.total);
+            setTotalPages(cached.totalPages);
+            setLoading(false);
+            setIsPageChanging(false);
+
+            // Pre-fetch lookahead window
+            prefetchBatch([page + 1, page + 2, page - 1], cached.totalPages);
+            return;
         }
 
-        const handleScroll = () => {
-            sessionStorage.setItem('tradingClientsScrollPos', el.scrollTop);
-        };
-        el.addEventListener('scroll', handleScroll, { passive: true });
-        return () => el.removeEventListener('scroll', handleScroll);
-    }, [loading]);
+        // If in-flight from predictive hover pre-fetch, reuse the ongoing promise!
+        if (prefetchInFlight.has(key)) {
+            setIsPageChanging(true);
+            const inFlightResult = await prefetchInFlight.get(key);
+            if (inFlightResult && inFlightResult.data) {
+                setClients(inFlightResult.data);
+                setTotal(inFlightResult.total);
+                setTotalPages(inFlightResult.totalPages);
+                setIsPageChanging(false);
+                prefetchBatch([page + 1, page + 2, page - 1], inFlightResult.totalPages);
+                return;
+            }
+        }
 
-    const handleSort = (field) => {
-        if (sortField === field) {
-            setSortDirection(prev => prev === 'asc' ? 'desc' : 'asc');
+        // Fetch with non-blocking indicator without blanking screen
+        fetchClients(true, page, true);
+    };
+
+    const getPaginationPages = () => {
+        const pages = [];
+        const maxVisible = 5;
+        if (totalPages <= maxVisible) {
+            for (let i = 1; i <= totalPages; i++) pages.push(i);
         } else {
-            setSortField(field);
-            setSortDirection('asc');
+            pages.push(1);
+            if (currentPage > 3) pages.push('...');
+            const start = Math.max(2, currentPage - 1);
+            const end = Math.min(totalPages - 1, currentPage + 1);
+            for (let i = start; i <= end; i++) pages.push(i);
+            if (currentPage < totalPages - 2) pages.push('...');
+            pages.push(totalPages);
         }
+        return pages;
     };
 
-    const sortedClients = React.useMemo(() => {
-        let result = [...clients];
-        if (sortField) {
-            result.sort((a, b) => {
-                let valA = a[sortField] ?? '';
-                let valB = b[sortField] ?? '';
-
-                if (['ledger_balance', 'gross_pl', 'brokerage', 'swap_charges', 'net_pl', 'active_trades_count', 'id'].includes(sortField)) {
-                    valA = parseFloat(valA) || 0;
-                    valB = parseFloat(valB) || 0;
-                } else if (typeof valA === 'string') {
-                    valA = valA.toLowerCase();
-                    valB = String(valB).toLowerCase();
-                }
-
-                if (valA < valB) return sortDirection === 'asc' ? -1 : 1;
-                if (valA > valB) return sortDirection === 'asc' ? 1 : -1;
-                return 0;
-            });
-        }
-        return result;
-    }, [clients, sortField, sortDirection]);
-
-    const totalPages = Math.max(1, Math.ceil((totalClients || clients.length) / itemsPerPage));
-    const paginatedClients = sortedClients;
+    // Use clients directly since backend filters search and status if passed
+    const filteredClients = clients;
 
     const toggleStatus = async (userId, currentStatus) => {
         const newStatus = currentStatus === 'Active' ? 'Inactive' : 'Active';
         try {
             await api.updateUserStatus(userId, newStatus);
             setToast({ message: `Status updated to ${newStatus}`, type: 'success' });
-            fetchClients();
+            clearTradingClientsCache();
+            fetchClients(false, currentPage);
         } catch (err) {
             console.error('Failed to update status:', err);
             setToast({ message: 'Failed to update status', type: 'error' });
@@ -275,7 +270,8 @@ const TradingClientsPage = ({ onDepositClick, onWithdrawClick, onLogout, onNavig
         try {
             await api.deleteUser(deleteConfirm.id);
             setToast({ message: `Client "${deleteConfirm.username}" deleted successfully`, type: 'success' });
-            fetchClients();
+            clearTradingClientsCache();
+            fetchClients(false, currentPage);
         } catch (err) {
             setToast({ message: 'Failed to delete client: ' + err.message, type: 'error' });
         } finally {
@@ -294,6 +290,8 @@ const TradingClientsPage = ({ onDepositClick, onWithdrawClick, onLogout, onNavig
             const data = await api.getClients(params);
             const clientsList = Array.isArray(data) ? data : [];
 
+            // Format rows matching media_1788188015170.png:
+            // User ID | Username | Brokerage | Profit/Loss | Net Amount
             const excelRows = clientsList.map(client => {
                 const brokerageVal = parseFloat(client.brokerage || 0);
                 const grossPlVal = parseFloat(client.gross_pl || 0);
@@ -309,16 +307,20 @@ const TradingClientsPage = ({ onDepositClick, onWithdrawClick, onLogout, onNavig
             });
 
             const worksheet = XLSX.utils.json_to_sheet(excelRows);
+
+            // Set clean column widths for Excel
             worksheet['!cols'] = [
-                { wch: 14 },
-                { wch: 16 },
-                { wch: 16 },
-                { wch: 16 },
-                { wch: 16 }
+                { wch: 14 }, // User ID
+                { wch: 16 }, // Username
+                { wch: 16 }, // Brokerage
+                { wch: 16 }, // Profit/Loss
+                { wch: 16 }  // Net Amount
             ];
 
             const workbook = XLSX.utils.book_new();
             XLSX.utils.book_append_sheet(workbook, worksheet, 'Users');
+
+            // Save as users.xlsx
             XLSX.writeFile(workbook, 'users.xlsx');
             setToast({ message: 'Excel file downloaded successfully!', type: 'success' });
         } catch (err) {
@@ -360,14 +362,14 @@ const TradingClientsPage = ({ onDepositClick, onWithdrawClick, onLogout, onNavig
                         </div>
                         <div className="flex flex-wrap gap-3">
                             <button
-                                onClick={() => fetchClients()}
+                                onClick={() => { clearTradingClientsCache(); fetchClients(true, 1); }}
                                 className="text-white px-6 py-2.5 rounded font-bold text-xs tracking-widest transition-all shadow-[0_4px_10px_rgba(76,175,80,0.3)] hover:shadow-[0_4px_20px_rgba(76,175,80,0.5)] active:scale-95 uppercase flex-1 sm:flex-none cursor-pointer"
                                 style={{ background: 'linear-gradient(60deg, #288c6c, #4ea752)' }}
                             >
                                 SEARCH
                             </button>
                             <button
-                                onClick={() => { setSearchTerm(''); setStatusFilter(''); setFromDate(''); setToDate(''); setCurrentPage(1); fetchClients(); }}
+                                onClick={() => { setSearchTerm(''); setStatusFilter(''); setFromDate(''); setToDate(''); clearTradingClientsCache(); fetchClients(true, 1); }}
                                 className="bg-[#808080] hover:bg-[#707070] text-white px-6 py-2.5 rounded font-bold text-xs tracking-widest flex items-center justify-center gap-2 shadow-lg transition-all uppercase flex-1 sm:flex-none cursor-pointer"
                             >
                                 <RotateCcw className="w-4 h-4" /> RESET
@@ -424,34 +426,19 @@ const TradingClientsPage = ({ onDepositClick, onWithdrawClick, onLogout, onNavig
                     {/* Table Container */}
                     <div className="bg-[#1f283e] overflow-hidden rounded-lg border border-white/5 shadow-2xl">
                         <div className="px-3 sm:px-6 py-3 sm:py-4 bg-[#1a2035] border-b border-white/5 flex items-center justify-between flex-wrap gap-2">
-                            <div className="flex items-center gap-3 flex-wrap">
-                                <span className="text-slate-400 text-xs sm:text-sm font-medium">
-                                    Showing <b className="text-white">{clients.length ? (currentPage - 1) * itemsPerPage + 1 : 0}</b> to <b className="text-white">{Math.min(currentPage * itemsPerPage, totalClients > 0 ? totalClients : clients.length)}</b> of <b className="text-white">{totalClients > 0 ? totalClients.toLocaleString() : (loading ? '...' : clients.length.toLocaleString())}</b> items. (Total: {totalClients > 0 ? totalClients.toLocaleString() : (loading ? '...' : clients.length.toLocaleString())})
-                                </span>
-                                {/* <div className="flex items-center gap-1.5 ml-2">
-                                <span className="text-xs text-slate-500 font-medium">Rows:</span>
-                                <select 
-                                    value={itemsPerPage} 
-                                    onChange={(e) => {
-                                        setItemsPerPage(Number(e.target.value));
-                                        setCurrentPage(1);
-                                        pageCacheRef.current = {};
-                                    }}
-                                    className="bg-[#151c2c] border border-white/10 text-white text-xs rounded px-2 py-1 outline-none cursor-pointer"
-                                >
-                                    <option value={50}>50</option>
-                                    <option value={100}>100</option>
-                                    <option value={250}>250</option>
-                                    <option value={500}>500</option>
-                                </select>
-                            </div> */}
-                            </div>
-                            {isRefreshing && (
-                                <span className="text-xs text-green-400 font-medium flex items-center gap-1.5 animate-pulse">
-                                    <span className="w-2 h-2 rounded-full bg-green-400"></span> Updating...
+                            <span className="text-slate-400 text-xs sm:text-sm font-medium">Showing <b className="text-white">{filteredClients.length}</b> of <b className="text-white">{total || filteredClients.length}</b> items.</span>
+                            {isPageChanging && (
+                                <span className="text-[11px] text-[#5cb85c] font-semibold flex items-center gap-1.5 animate-pulse">
+                                    <span className="inline-block w-1.5 h-1.5 rounded-full bg-[#5cb85c]"></span>
+                                    Loading page...
                                 </span>
                             )}
                         </div>
+                        {isPageChanging && (
+                            <div className="h-0.5 w-full bg-[#1a2035] overflow-hidden">
+                                <div className="h-full bg-gradient-to-r from-[#288c6c] via-[#4ea752] to-[#5cb85c] animate-pulse"></div>
+                            </div>
+                        )}
 
                         <div className="overflow-x-auto custom-scrollbar" style={{ WebkitOverflowScrolling: 'touch' }}>
                             <table className="w-full text-left border-collapse custom-table" style={{ minWidth: '900px' }}>
@@ -459,61 +446,36 @@ const TradingClientsPage = ({ onDepositClick, onWithdrawClick, onLogout, onNavig
                                     <tr className="text-white/90 text-[11px] sm:text-[13px] uppercase tracking-wider">
                                         <th className="px-2 sm:px-4 py-3 sm:py-5 font-bold w-8 sm:w-16 whitespace-nowrap">#</th>
                                         <th className="px-2 sm:px-4 py-3 sm:py-5 font-bold text-center whitespace-nowrap">ACTIONS</th>
-                                        <th onClick={() => handleSort('username')} className="px-2 sm:px-4 py-3 sm:py-5 font-bold text-center whitespace-nowrap cursor-pointer select-none hover:text-green-400 transition-colors">
-                                            Username {sortField === 'username' ? (sortDirection === 'asc' ? '↑' : '↓') : ''}
-                                        </th>
-                                        <th onClick={() => handleSort('full_name')} className="px-2 sm:px-4 py-3 sm:py-5 font-bold whitespace-nowrap cursor-pointer select-none hover:text-green-400 transition-colors">
-                                            Full Name {sortField === 'full_name' ? (sortDirection === 'asc' ? '↑' : '↓') : ''}
-                                        </th>
-                                        <th onClick={() => handleSort('ledger_balance')} className="px-2 sm:px-4 py-3 sm:py-5 font-bold whitespace-nowrap cursor-pointer select-none hover:text-green-400 transition-colors">
-                                            Ledger Bal. {sortField === 'ledger_balance' ? (sortDirection === 'asc' ? '↑' : '↓') : ''}
-                                        </th>
+                                        <th className="px-2 sm:px-4 py-3 sm:py-5 font-bold text-center whitespace-nowrap">Username</th>
+                                        <th className="px-2 sm:px-4 py-3 sm:py-5 font-bold whitespace-nowrap">Full Name ↑</th>
+                                        <th className="px-2 sm:px-4 py-3 sm:py-5 font-bold whitespace-nowrap">Ledger Bal.</th>
                                         {(isAdmin() || isBroker()) && (
                                             <>
-                                                <th onClick={() => handleSort('gross_pl')} className="px-2 sm:px-4 py-3 sm:py-5 font-bold whitespace-nowrap cursor-pointer select-none hover:text-green-400 transition-colors">
-                                                    Gross P/L {sortField === 'gross_pl' ? (sortDirection === 'asc' ? '↑' : '↓') : ''}
-                                                </th>
-                                                <th onClick={() => handleSort('brokerage')} className="px-2 sm:px-4 py-3 sm:py-5 font-bold whitespace-nowrap cursor-pointer select-none hover:text-green-400 transition-colors">
-                                                    Brokerage {sortField === 'brokerage' ? (sortDirection === 'asc' ? '↑' : '↓') : ''}
-                                                </th>
-                                                <th onClick={() => handleSort('swap_charges')} className="px-2 sm:px-4 py-3 sm:py-5 font-bold whitespace-nowrap cursor-pointer select-none hover:text-green-400 transition-colors">
-                                                    Swap {sortField === 'swap_charges' ? (sortDirection === 'asc' ? '↑' : '↓') : ''}
-                                                </th>
-                                                <th onClick={() => handleSort('net_pl')} className="px-2 sm:px-4 py-3 sm:py-5 font-bold whitespace-nowrap cursor-pointer select-none hover:text-green-400 transition-colors">
-                                                    Net P/L {sortField === 'net_pl' ? (sortDirection === 'asc' ? '↑' : '↓') : ''}
-                                                </th>
+                                                <th className="px-2 sm:px-4 py-3 sm:py-5 font-bold whitespace-nowrap">Gross P/L</th>
+                                                <th className="px-2 sm:px-4 py-3 sm:py-5 font-bold whitespace-nowrap">Brokerage</th>
+                                                <th className="px-2 sm:px-4 py-3 sm:py-5 font-bold whitespace-nowrap">Swap</th>
+                                                <th className="px-2 sm:px-4 py-3 sm:py-5 font-bold whitespace-nowrap">Net P/L</th>
                                             </>
                                         )}
-                                        <th onClick={() => handleSort('is_demo')} className="px-2 sm:px-4 py-3 sm:py-5 font-bold whitespace-nowrap cursor-pointer select-none hover:text-green-400 transition-colors">
-                                            Demo {sortField === 'is_demo' ? (sortDirection === 'asc' ? '↑' : '↓') : ''}
-                                        </th>
-                                        <th onClick={() => handleSort('status')} className="px-2 sm:px-4 py-3 sm:py-5 font-bold whitespace-nowrap cursor-pointer select-none hover:text-green-400 transition-colors">
-                                            Status {sortField === 'status' ? (sortDirection === 'asc' ? '↑' : '↓') : ''}
-                                        </th>
+                                        <th className="px-2 sm:px-4 py-3 sm:py-5 font-bold whitespace-nowrap">Demo</th>
+                                        <th className="px-2 sm:px-4 py-3 sm:py-5 font-bold whitespace-nowrap">Status</th>
                                         {isAdmin() && (
                                             <>
-                                                <th onClick={() => handleSort('active_trades_count')} className="px-2 sm:px-4 py-3 sm:py-5 font-bold whitespace-nowrap cursor-pointer select-none hover:text-green-400 transition-colors">
-                                                    Trades {sortField === 'active_trades_count' ? (sortDirection === 'asc' ? '↑' : '↓') : ''}
-                                                </th>
+                                                <th className="px-2 sm:px-4 py-3 sm:py-5 font-bold whitespace-nowrap">Trades</th>
                                                 <th className="px-2 sm:px-4 py-3 sm:py-5 font-bold whitespace-nowrap">Backup</th>
                                             </>
                                         )}
                                         <th className="px-2 sm:px-4 py-3 sm:py-5 font-bold whitespace-nowrap">KYC</th>
                                     </tr>
                                 </thead>
-                                <tbody className="text-[11px] sm:text-[13px] text-slate-300">
-                                    {loading && clients.length === 0 ? (
+                                <tbody className={`text-[11px] sm:text-[13px] text-slate-300 transition-opacity duration-150 ${isPageChanging ? 'opacity-50' : 'opacity-100'}`}>
+                                    {loading && filteredClients.length === 0 ? (
                                         <tr>
-                                            <td colSpan="14" className="px-4 py-12 text-center text-slate-400 font-medium">
-                                                <div className="flex flex-col items-center justify-center gap-2">
-                                                    <div className="w-6 h-6 border-2 border-green-500 border-t-transparent rounded-full animate-spin"></div>
-                                                    <span className="text-xs text-slate-400">Loading trading clients...</span>
-                                                </div>
-                                            </td>
+                                            <td colSpan="14" className="px-4 py-12 text-center text-slate-500 font-medium italic">Loading clients...</td>
                                         </tr>
-                                    ) : paginatedClients.length > 0 ? paginatedClients.map((client, index) => (
+                                    ) : filteredClients.length > 0 ? filteredClients.map((client, index) => (
                                         <tr key={client.id} className="border-t border-white/5 hover:bg-white/[0.02] transition-colors">
-                                            <td className="px-2 sm:px-4 py-3 sm:py-6">{(currentPage - 1) * itemsPerPage + index + 1}</td>
+                                            <td className="px-2 sm:px-4 py-3 sm:py-6">{((currentPage - 1) * PAGE_SIZE) + index + 1}</td>
                                             <td className="px-2 sm:px-4 py-3 sm:py-6">
                                                 <div className="flex flex-col items-center gap-1.5">
                                                     <div className="flex items-center gap-2">
@@ -582,8 +544,8 @@ const TradingClientsPage = ({ onDepositClick, onWithdrawClick, onLogout, onNavig
                                             )}
                                             <td className="px-2 sm:px-4 py-3 sm:py-6">
                                                 <span className={`px-2 py-0.5 rounded-full text-[9px] sm:text-[10px] font-bold uppercase tracking-widest border ${(client.kycStatus || '').toUpperCase() === 'VERIFIED' ? 'bg-green-500/10 border-green-500/20 text-green-400' :
-                                                    (client.kycStatus || '').toUpperCase() === 'REJECTED' ? 'bg-red-500/10 border-red-500/20 text-red-400' :
-                                                        'bg-orange-500/10 border-orange-500/20 text-orange-400'
+                                                        (client.kycStatus || '').toUpperCase() === 'REJECTED' ? 'bg-red-500/10 border-red-500/20 text-red-400' :
+                                                            'bg-orange-500/10 border-orange-500/20 text-orange-400'
                                                     }`}>
                                                     {(client.kycStatus || '').toUpperCase() === 'VERIFIED' ? 'VERIFIED' :
                                                         (client.kycStatus || '').toUpperCase() === 'REJECTED' ? 'REJECTED' : 'PENDING'}
@@ -600,62 +562,47 @@ const TradingClientsPage = ({ onDepositClick, onWithdrawClick, onLogout, onNavig
                         </div>
 
                         {/* Pagination */}
-                        {totalPages > 1 && (
-                            <div className="px-5 py-4 border-t border-white/5 flex items-center justify-between bg-[#1a2035] flex-wrap gap-4">
-                                <span className="text-slate-400 text-sm">
-                                    Page <b className="text-white">{currentPage}</b> of <b className="text-white">{totalPages.toLocaleString()}</b>
-                                </span>
-                                <div className="flex items-center gap-1">
-                                    <button
-                                        onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
-                                        disabled={currentPage === 1}
-                                        className="px-3 py-1.5 rounded bg-white/5 text-slate-300 hover:bg-white/10 hover:text-white disabled:opacity-50 disabled:cursor-not-allowed transition-colors text-sm font-medium cursor-pointer"
-                                    >
-                                        Prev
-                                    </button>
-
-                                    {(() => {
-                                        const pageSet = new Set();
-                                        [1, totalPages, currentPage - 2, currentPage - 1, currentPage, currentPage + 1, currentPage + 2].forEach(num => {
-                                            if (num >= 1 && num <= totalPages) pageSet.add(num);
-                                        });
-                                        const visiblePages = Array.from(pageSet).sort((a, b) => a - b);
-                                        return visiblePages.map((p, i, arr) => {
-                                            if (i > 0 && arr[i] - arr[i - 1] > 1) {
-                                                return (
-                                                    <React.Fragment key={`ellipsis-${p}`}>
-                                                        <span className="text-slate-500 px-1.5 select-none">...</span>
-                                                        <button
-                                                            onClick={() => setCurrentPage(p)}
-                                                            className={`min-w-[32px] h-8 px-2 flex items-center justify-center rounded text-sm font-bold transition-all cursor-pointer ${currentPage === p ? 'bg-[#5cb85c] text-white shadow-lg' : 'bg-white/5 text-slate-300 hover:bg-white/10'}`}
-                                                        >
-                                                            {p}
-                                                        </button>
-                                                    </React.Fragment>
-                                                );
-                                            }
-                                            return (
-                                                <button
-                                                    key={p}
-                                                    onClick={() => setCurrentPage(p)}
-                                                    className={`min-w-[32px] h-8 px-2 flex items-center justify-center rounded text-sm font-bold transition-all cursor-pointer ${currentPage === p ? 'bg-[#5cb85c] text-white shadow-lg' : 'bg-white/5 text-slate-300 hover:bg-white/10'}`}
-                                                >
-                                                    {p}
-                                                </button>
-                                            );
-                                        });
-                                    })()}
-
-                                    <button
-                                        onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))}
-                                        disabled={currentPage === totalPages}
-                                        className="px-3 py-1.5 rounded bg-white/5 text-slate-300 hover:bg-white/10 hover:text-white disabled:opacity-50 disabled:cursor-not-allowed transition-colors text-sm font-medium cursor-pointer"
-                                    >
-                                        Next
-                                    </button>
-                                </div>
+                        <div className="px-5 py-4 border-t border-white/5 bg-[#1a2035] flex items-center justify-between gap-3 flex-wrap">
+                            <span className="text-xs text-slate-500">Page {currentPage} of {totalPages} (Total: {total})</span>
+                            <div className="flex items-center gap-1.5">
+                                <button
+                                    onClick={() => handlePageChange(Math.max(1, currentPage - 1))}
+                                    onMouseEnter={() => silentPrefetch(Math.max(1, currentPage - 1), totalPages)}
+                                    onTouchStart={() => silentPrefetch(Math.max(1, currentPage - 1), totalPages)}
+                                    disabled={currentPage === 1}
+                                    className="w-8 h-8 flex items-center justify-center rounded bg-white/5 hover:bg-white/10 text-slate-400 hover:text-white disabled:opacity-30 disabled:cursor-not-allowed transition-all cursor-pointer"
+                                >
+                                    <ChevronLeft className="w-4 h-4" />
+                                </button>
+                                {getPaginationPages().map((page, idx) =>
+                                    page === '...' ? (
+                                        <span key={`ellipsis-${idx}`} className="w-8 h-8 flex items-center justify-center text-slate-500 text-xs">…</span>
+                                    ) : (
+                                        <button
+                                            key={page}
+                                            onClick={() => handlePageChange(page)}
+                                            onMouseEnter={() => silentPrefetch(page, totalPages)}
+                                            onTouchStart={() => silentPrefetch(page, totalPages)}
+                                            className={`w-8 h-8 flex items-center justify-center rounded text-xs font-bold transition-all cursor-pointer ${currentPage === page
+                                                    ? 'bg-[#4CAF50] text-white shadow-lg shadow-green-900/30'
+                                                    : 'bg-white/5 hover:bg-white/10 text-slate-400 hover:text-white'
+                                                }`}
+                                        >
+                                            {page}
+                                        </button>
+                                    )
+                                )}
+                                <button
+                                    onClick={() => handlePageChange(Math.min(totalPages, currentPage + 1))}
+                                    onMouseEnter={() => silentPrefetch(Math.min(totalPages, currentPage + 1), totalPages)}
+                                    onTouchStart={() => silentPrefetch(Math.min(totalPages, currentPage + 1), totalPages)}
+                                    disabled={currentPage === totalPages}
+                                    className="w-8 h-8 flex items-center justify-center rounded bg-white/5 hover:bg-white/10 text-slate-400 hover:text-white disabled:opacity-30 disabled:cursor-not-allowed transition-all cursor-pointer"
+                                >
+                                    <ChevronRight className="w-4 h-4" />
+                                </button>
                             </div>
-                        )}
+                        </div>
                     </div>
                 </div>
 

@@ -2,6 +2,8 @@
  * Standardized Segment Margin Calculator for Admin Frontend (Trading_Frontend)
  */
 
+import { getMcxBaseScrip as getExchangeMcxBase } from './mcxLotSizes';
+
 export const getMcxBaseScrip = (symbol = '') => {
   if (!symbol) return '';
   const clean = symbol.toUpperCase().trim();
@@ -181,7 +183,20 @@ export const calculateSegmentMargin = ({
   if (exposureType === 'PER_LOT_BASIS') {
     const baseSym = getMcxBaseScrip(symbol);
     const noSlash = (symbol || '').replace('/', '');
-    const symbolConfig = lotMargins[symbol] || lotMargins[baseSym] || lotMargins[noSlash] || {};
+    let symbolConfig = lotMargins[symbol] || lotMargins[baseSym] || lotMargins[noSlash] || {};
+    // MCX futures are saved in the client form as GOLD, not MCX:GOLD.
+    // Options, NFO, crypto, forex and comex keep the lookup above.
+    if (mType === 'MCX' && !isOption) {
+      const mcxKey = getExchangeMcxBase(symbol);
+      const formKey = {
+        CRUDEOILM: 'CRUDEOIL MINI',
+        NATGASMINI: 'NATURALGAS MINI',
+        SILVERMIC: 'SILVER MIC',
+        MCXBULLDEX: 'BULLDEX'
+      }[mcxKey];
+      const saved = (mcxKey && lotMargins[mcxKey]) || (formKey && lotMargins[formKey]);
+      if (saved) symbolConfig = saved;
+    }
     const marginPerLot = parseFloat(
       symbolConfig[tradeType] !== undefined ? symbolConfig[tradeType] : (symbolConfig.intraday_margin || 0)
     );

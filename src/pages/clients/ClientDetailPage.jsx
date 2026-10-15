@@ -984,9 +984,12 @@ const ClientDetailPage = ({ client, onClose, onUpdate, onReset, onRecalculate, o
                                             onClick={async () => {
                                                 if (!tradeToClose) return;
                                                 try {
-                                                    const finalSellRate = parseFloat(closeSellRate || liveRate || tradeToClose.current_price || 0);
-                                                    console.log('Closing trade with exitPrice:', finalSellRate);
-                                                    await api.closeTrade(tradeToClose.id, { exitPrice: finalSellRate });
+                                                    const typedRate = parseFloat(closeSellRate);
+                                                    const finalSellRate = typedRate > 0
+                                                        ? typedRate
+                                                        : parseFloat(liveRate || tradeToClose.current_price || 0);
+                                                    const closeBody = finalSellRate > 0 ? { exitPrice: finalSellRate } : {};
+                                                    await api.closeTrade(tradeToClose.id, closeBody);
 
                                                     const res = await api.getTrades({ user_id: effectiveClient.id, status: 'OPEN', is_pending: 0 });
                                                     const rawActive = Array.isArray(res) ? res : res?.data || [];

@@ -16,11 +16,10 @@ const ClosedPositionsPage = () => {
         try {
             const { getClosedPositions } = await import('../../services/api');
             const data = await getClosedPositions();
-            const tradesList = Array.isArray(data) ? data : (Array.isArray(data?.data) ? data.data : []);
-            setRawTrades(tradesList);
+            const list = Array.isArray(data) ? data : (data?.data || []);
+            setRawTrades(list);
         } catch (err) {
             console.error('Fetch closed error:', err);
-            setRawTrades([]);
         } finally {
             setLoading(false);
         }
@@ -30,7 +29,6 @@ const ClosedPositionsPage = () => {
         fetchClosedTrades();
     }, []);
 
-    
     useEffect(() => {
         const queryParams = new URLSearchParams(location.search);
         const symbolParam = queryParams.get('symbol');
@@ -51,9 +49,9 @@ const ClosedPositionsPage = () => {
 
     // Process main summary table data
     const processData = (trades) => {
-        if (!Array.isArray(trades)) return [];
+        const list = Array.isArray(trades) ? trades : (trades?.data || []);
         const groups = {};
-        trades.forEach(t => {
+        list.forEach(t => {
             const sym = t.symbol;
             if (!sym) return;
             const symUpper = sym.toUpperCase();
@@ -103,9 +101,9 @@ const ClosedPositionsPage = () => {
 
     // Process breakdown detail data for a specific symbol
     const processDetails = (trades, symbol) => {
-        if (!Array.isArray(trades)) return [];
+        const list = Array.isArray(trades) ? trades : (trades?.data || []);
         const userGroups = {};
-        trades.forEach(t => {
+        list.forEach(t => {
             const sym = t.symbol;
             if (!sym || sym.toUpperCase() !== symbol.toUpperCase()) return;
             

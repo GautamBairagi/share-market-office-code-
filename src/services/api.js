@@ -102,6 +102,11 @@ export const getActivePositions = async (filters = {}) => {
     return response.data;
 };
 
+export const getActivePositionDetails = async (symbol) => {
+    const response = await api.get('/trades/active/details', { params: { symbol } });
+    return response.data;
+};
+
 export const getClosedPositions = async (filters = {}) => {
     const response = await api.get('/trades', {
         params: { status: 'CLOSED', ...filters }
@@ -111,8 +116,7 @@ export const getClosedPositions = async (filters = {}) => {
 
 // ─── TRADES ──────────────────────────────────────────
 export const getTrades = async (filters = {}) => {
-    const { signal, ...params } = filters;
-    const response = await api.get('/trades', { params, signal });
+    const response = await dedupedGet('/trades', { params: filters });
     return response.data;
 };
 
@@ -446,8 +450,8 @@ export const getWatchlist = async () => {
     return response.data;
 };
 
-export const getLiveM2M = async (userId = null, days = 7) => {
-    const response = await api.get('/dashboard/live-m2m', { params: { userId, days } });
+export const getLiveM2M = async (userId = null) => {
+    const response = await api.get('/dashboard/live-m2m', { params: { userId } });
     return response.data;
 };
 
