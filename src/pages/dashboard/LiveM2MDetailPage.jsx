@@ -4,15 +4,77 @@ import { useParams } from 'react-router-dom';
 import { getLiveM2M, getClientById } from '../../services/api';
 import { displaySymbol } from '../../utils/marketUtils';
 
+// Module-level in-memory cache for instant (0ms) mount on detail view navigation
+const liveM2mDetailCache = new Map();
+const prefetchInFlight = new Map();
+
+// Method 1: Silent hover pre-fetcher for instant 0ms click
+export const prefetchLiveM2MDetail = async (clientId) => {
+    if (!clientId || liveM2mDetailCache.has(String(clientId)) || prefetchInFlight.has(String(clientId))) return;
+    const p = (async () => {
+        try {
+            const response = await getLiveM2M(clientId);
+            const clients = response?.clients || [];
+            const stats = response?.stats || {};
+            const isBroker = !!response?.isBroker;
+            const isBrokerList = !!response?.isBrokerList;
+            const newData = clients.map(c => ({
+                ...c,
+                ledger: parseFloat(c.ledger || 0).toFixed(2),
+                m2m: parseFloat(c.m2m || 0).toFixed(2),
+                activePL: parseFloat(c.activePL || 0).toFixed(2),
+                closedPL: parseFloat(c.closedPL || 0).toFixed(2),
+                margin: parseFloat(c.margin || 0).toFixed(2),
+                marginUsed: parseFloat(c.marginUsed || 0).toFixed(2),
+                holding: '0',
+                trades: c.activeTrades || 0,
+                positions: c.positions || []
+            }));
+            liveM2mDetailCache.set(String(clientId), {
+                subClients: newData,
+                backendStats: stats,
+                isBroker,
+                isBrokerList
+            });
+            if (liveM2mDetailCache.size > 25) {
+                const oldest = liveM2mDetailCache.keys().next().value;
+                liveM2mDetailCache.delete(oldest);
+            }
+        } catch (_) {
+        } finally {
+            prefetchInFlight.delete(String(clientId));
+        }
+    })();
+    prefetchInFlight.set(String(clientId), p);
+};
+
 const LiveM2MDetailPage = ({ selectedClient: initialClient, onBack, onClientClick }) => {
     const { id } = useParams();
-    const [selectedClient, setSelectedClient] = useState(initialClient);
-    const [subClients, setSubClients] = useState([]);
-    const [backendStats, setBackendStats] = useState(null);
-    const [loading, setLoading] = useState(true);
+    const targetId = id || initialClient?.id || initialClient?.userId;
+    const cached = targetId ? liveM2mDetailCache.get(String(targetId)) : null;
+
+    const [selectedClient, setSelectedClient] = useState(initialClient || cached?.selectedClient);
+    const [subClients, setSubClients] = useState(() => cached?.subClients || []);
+    const [backendStats, setBackendStats] = useState(() => cached?.backendStats || null);
+    const [loading, setLoading] = useState(() => !cached);
     const [prevData, setPrevData] = useState({});
-    const [isBroker, setIsBroker] = useState(false);
-    const [isBrokerList, setIsBrokerList] = useState(false);
+    const [isBroker, setIsBroker] = useState(() => cached ? cached.isBroker : false);
+    const [isBrokerList, setIsBrokerList] = useState(() => cached ? cached.isBrokerList : false);
+
+    // Sync cached data on client ID change for instant 0ms transition
+    useEffect(() => {
+        const clientId = id || selectedClient?.id || selectedClient?.userId;
+        if (clientId && liveM2mDetailCache.has(String(clientId))) {
+            const cachedData = liveM2mDetailCache.get(String(clientId));
+            if (cachedData) {
+                setSubClients(cachedData.subClients || []);
+                setBackendStats(cachedData.backendStats || null);
+                setIsBroker(!!cachedData.isBroker);
+                setIsBrokerList(!!cachedData.isBrokerList);
+                setLoading(false);
+            }
+        }
+    }, [id, selectedClient?.id]);
 
     // Recover client data if missing (on refresh or history back)
     useEffect(() => {
@@ -38,26 +100,39 @@ const LiveM2MDetailPage = ({ selectedClient: initialClient, onBack, onClientClic
 
                 let clients = response?.clients || [];
                 const stats = response?.stats || {};
-                setIsBroker(!!response?.isBroker);
-                setIsBrokerList(!!response?.isBrokerList);
+                const currentIsBroker = !!response?.isBroker;
+                const currentIsBrokerList = !!response?.isBrokerList;
+                setIsBroker(currentIsBroker);
+                setIsBrokerList(currentIsBrokerList);
 
-                setSubClients(prev => {
-                    // Update state and track changes for animation
-                    const newData = clients.map(c => ({
-                        ...c,
-                        ledger: parseFloat(c.ledger || 0).toFixed(2),
-                        m2m: parseFloat(c.m2m || 0).toFixed(2),
-                        activePL: parseFloat(c.activePL || 0).toFixed(2),
-                        closedPL: parseFloat(c.closedPL || 0).toFixed(2),
-                        margin: parseFloat(c.margin || 0).toFixed(2),
-                        marginUsed: parseFloat(c.marginUsed || 0).toFixed(2),
-                        holding: '0',
-                        trades: c.activeTrades || 0,
-                        positions: c.positions || []
-                    }));
-                    return newData;
-                });
+                const newData = clients.map(c => ({
+                    ...c,
+                    ledger: parseFloat(c.ledger || 0).toFixed(2),
+                    m2m: parseFloat(c.m2m || 0).toFixed(2),
+                    activePL: parseFloat(c.activePL || 0).toFixed(2),
+                    closedPL: parseFloat(c.closedPL || 0).toFixed(2),
+                    margin: parseFloat(c.margin || 0).toFixed(2),
+                    marginUsed: parseFloat(c.marginUsed || 0).toFixed(2),
+                    holding: '0',
+                    trades: c.activeTrades || 0,
+                    positions: c.positions || []
+                }));
+
+                setSubClients(newData);
                 setBackendStats(stats);
+
+                // Save to bounded session cache (max 25 entries to prevent any memory leak)
+                liveM2mDetailCache.set(String(clientId), {
+                    subClients: newData,
+                    backendStats: stats,
+                    isBroker: currentIsBroker,
+                    isBrokerList: currentIsBrokerList,
+                    selectedClient
+                });
+                if (liveM2mDetailCache.size > 25) {
+                    const oldestKey = liveM2mDetailCache.keys().next().value;
+                    liveM2mDetailCache.delete(oldestKey);
+                }
             } catch (err) {
                 console.error('Failed to fetch M2M detail:', err);
             } finally {
@@ -136,16 +211,28 @@ const LiveM2MDetailPage = ({ selectedClient: initialClient, onBack, onClientClic
         </div>
     );
 
-    const totals = subClients.reduce((acc, c) => ({
-        ledger: acc.ledger + parseFloat(c.ledger),
-        m2m: acc.m2m + parseFloat(c.m2m),
-        activePL: acc.activePL + parseFloat(c.activePL),
+    // Method 2: Instant Header Card Hydration (0ms display from initial props while sub-traders load)
+    const fallbackTotals = initialClient ? {
+        ledger: parseFloat(initialClient.ledger || initialClient.balance || 0),
+        m2m: parseFloat(initialClient.m2m || 0),
+        activePL: parseFloat(initialClient.activePL || 0),
+        closedPL: parseFloat(initialClient.closedPL || 0),
+        trades: parseInt(initialClient.activeTrades || initialClient.trades || 0),
+        margin: parseFloat(initialClient.margin || 0),
+        marginUsed: parseFloat(initialClient.marginUsed || 0),
+        holding: parseFloat(initialClient.holding || 0)
+    } : { ledger: 0, m2m: 0, activePL: 0, closedPL: 0, trades: 0, margin: 0, marginUsed: 0, holding: 0 };
+
+    const totals = subClients.length > 0 ? subClients.reduce((acc, c) => ({
+        ledger: acc.ledger + parseFloat(c.ledger || 0),
+        m2m: acc.m2m + parseFloat(c.m2m || 0),
+        activePL: acc.activePL + parseFloat(c.activePL || 0),
         closedPL: acc.closedPL + parseFloat(c.closedPL || 0),
-        trades: acc.trades + parseInt(c.trades),
-        margin: acc.margin + parseFloat(c.margin),
+        trades: acc.trades + parseInt(c.trades || 0),
+        margin: acc.margin + parseFloat(c.margin || 0),
         marginUsed: acc.marginUsed + parseFloat(c.marginUsed || 0),
-        holding: acc.holding + parseFloat(c.holding)
-    }), { ledger: 0, m2m: 0, activePL: 0, closedPL: 0, trades: 0, margin: 0, marginUsed: 0, holding: 0 });
+        holding: acc.holding + parseFloat(c.holding || 0)
+    }), { ledger: 0, m2m: 0, activePL: 0, closedPL: 0, trades: 0, margin: 0, marginUsed: 0, holding: 0 }) : fallbackTotals;
 
     const parseFormattedVal = (group, segment) => {
         if (!backendStats || !backendStats[group]) return 0;
@@ -231,7 +318,7 @@ const LiveM2MDetailPage = ({ selectedClient: initialClient, onBack, onClientClic
                                         </tr>
                                     </thead>
                                     <tbody className="text-[13px] font-medium text-slate-300">
-                                        {loading ? (
+                                        {loading && subClients.length === 0 ? (
                                             <tr><td colSpan="5" className="px-4 py-10 text-center text-slate-500 animate-pulse uppercase font-black text-xs">Fetching Real-time Data...</td></tr>
                                         ) : subClients.length === 0 ? (
                                             <tr><td colSpan="5" className="px-4 py-10 text-center text-slate-500 uppercase font-black text-xs">No active brokers.</td></tr>
@@ -242,6 +329,8 @@ const LiveM2MDetailPage = ({ selectedClient: initialClient, onBack, onClientClic
                                                     <td className="px-3 sm:px-4 py-3 sm:py-4">
                                                         <button
                                                             onClick={() => onClientClick(client)}
+                                                            onMouseEnter={() => prefetchLiveM2MDetail(client.id)}
+                                                            onTouchStart={() => prefetchLiveM2MDetail(client.id)}
                                                             className="inline-block px-4 py-1 rounded-full text-[11px] font-bold text-white shadow-[0_4px_10px_rgba(76,175,80,0.4)] hover:shadow-[0_4px_20px_rgba(76,175,80,0.6)] transition-all cursor-pointer border border-white/10"
                                                             style={{ background: 'linear-gradient(60deg, #288c6c, #4ea752)' }}
                                                         >
@@ -296,7 +385,7 @@ const LiveM2MDetailPage = ({ selectedClient: initialClient, onBack, onClientClic
                                         </tr>
                                     </thead>
                                     <tbody className="text-[13px] font-medium text-slate-300">
-                                        {loading ? (
+                                        {loading && subClients.length === 0 ? (
                                             <tr><td colSpan="8" className="px-4 py-10 text-center text-slate-500 animate-pulse uppercase font-black text-xs">Fetching Real-time Data...</td></tr>
                                         ) : subClients.length === 0 ? (
                                             <tr><td colSpan="8" className="px-4 py-10 text-center text-slate-500 uppercase font-black text-xs">No active traders.</td></tr>
@@ -307,6 +396,8 @@ const LiveM2MDetailPage = ({ selectedClient: initialClient, onBack, onClientClic
                                                     <td className="px-3 sm:px-4 py-3 sm:py-4">
                                                         <button
                                                             onClick={() => onClientClick(client)}
+                                                            onMouseEnter={() => prefetchLiveM2MDetail(client.id)}
+                                                            onTouchStart={() => prefetchLiveM2MDetail(client.id)}
                                                             className="inline-block px-4 py-1 rounded-full text-[11px] font-bold text-white shadow-[0_4px_10px_rgba(76,175,80,0.4)] hover:shadow-[0_4px_20px_rgba(76,175,80,0.6)] transition-all cursor-pointer border border-white/10"
                                                             style={{ background: 'linear-gradient(60deg, #288c6c, #4ea752)' }}
                                                         >
@@ -368,7 +459,7 @@ const LiveM2MDetailPage = ({ selectedClient: initialClient, onBack, onClientClic
                                     </tr>
                                 </thead>
                                 <tbody className="text-[13px] font-medium text-slate-300">
-                                    {loading ? (
+                                    {loading && positions.length === 0 ? (
                                         <tr><td colSpan="6" className="px-4 py-10 text-center text-slate-500 animate-pulse uppercase font-black text-xs">Fetching Real-time Data...</td></tr>
                                     ) : positions.length === 0 ? (
                                         <tr><td colSpan="6" className="px-4 py-10 text-center text-slate-500 uppercase font-black text-xs">No active positions for this user.</td></tr>

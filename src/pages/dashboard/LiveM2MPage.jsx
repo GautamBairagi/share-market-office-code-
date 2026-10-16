@@ -1,12 +1,16 @@
 import React, { useState, useEffect } from 'react';
 import SegmentDashboard from '../../components/dashboard/SegmentDashboard';
 import * as api from '../../services/api';
+import { prefetchLiveM2MDetail } from './LiveM2MDetailPage';
+
+// Module-level in-memory cache for instant (0ms) mount on dashboard navigation
+let liveM2mPageCache = { clients: [], stats: null };
 
 const LiveM2MPage = ({ onNavigate, user }) => {
   const isClient = user?.role === 'TRADER';
-  const [clients, setClients] = useState([]);
-  const [stats, setStats] = useState(null);
-  const [loading, setLoading] = useState(true);
+  const [clients, setClients] = useState(() => liveM2mPageCache.clients || []);
+  const [stats, setStats] = useState(() => liveM2mPageCache.stats || null);
+  const [loading, setLoading] = useState(() => (!liveM2mPageCache.clients || liveM2mPageCache.clients.length === 0));
   const [prevPL, setPrevPL] = useState({});
   const [flashes, setFlashes] = useState({});
 
@@ -62,6 +66,7 @@ const LiveM2MPage = ({ onNavigate, user }) => {
 
       setClients(newClients);
       setStats(newStats);
+      liveM2mPageCache = { clients: newClients, stats: newStats };
       setPrevPL({ ...prevPL });
     } catch (err) {
       console.error('Failed to fetch live M2M:', err);
@@ -182,7 +187,7 @@ const LiveM2MPage = ({ onNavigate, user }) => {
                 </tr>
               </thead>
               <tbody className="text-[13px] text-slate-300">
-                {loading ? (
+                {loading && clients.length === 0 ? (
                   <tr><td colSpan={5} className="px-4 py-8 text-center text-slate-500">Loading...</td></tr>
                 ) : clients.length === 0 ? (
                   <tr><td colSpan={5} className="px-4 py-8 text-center text-slate-500">{isAdminOrSuper ? 'No active brokers' : 'No active traders'}</td></tr>
@@ -195,6 +200,8 @@ const LiveM2MPage = ({ onNavigate, user }) => {
                       <td className="px-4 py-3">
                         <button
                           onClick={() => onNavigate(`dashboard-detail/${client.id}`, client)}
+                          onMouseEnter={() => prefetchLiveM2MDetail(client.id)}
+                          onTouchStart={() => prefetchLiveM2MDetail(client.id)}
                           className="inline-block px-4 py-1 rounded-full text-[11px] font-bold text-white shadow-[0_4px_10px_rgba(76,175,80,0.4)] hover:shadow-[0_4px_20px_rgba(76,175,80,0.6)] transition-all cursor-pointer border border-white/10"
                           style={{ background: 'linear-gradient(60deg, #288c6c, #4ea752)' }}
                         >

@@ -4,14 +4,19 @@ import { useParams } from 'react-router-dom';
 import { getLiveM2M, getClientById } from '../../services/api';
 import { displaySymbol } from '../../utils/marketUtils';
 
+// Module-level in-memory cache for instant (0ms) mount on active positions navigation
+const clientPositionsCache = new Map();
+
 const ClientActivePositionsPage = ({ client: initialClient, onBack, onNavigateToAccount }) => {
     const { id } = useParams();
     const [client, setClient] = useState(initialClient);
-    const [positions, setPositions] = useState([]);
-    const [loading, setLoading] = useState(true);
+    const clientId = id || client?.id || initialClient?.id;
+    const cachedPositions = clientId ? clientPositionsCache.get(String(clientId)) : null;
+
+    const [positions, setPositions] = useState(() => cachedPositions || []);
+    const [loading, setLoading] = useState(() => !cachedPositions);
     const [prevData, setPrevData] = useState({});
 
-    const clientId = id || client?.id;
     const clientName = client?.username || client?.fullName || id || 'TRADER';
 
     // lotsCount = qty_input (how many lots), totalQty = actual_qty (total shares/units)
@@ -49,6 +54,11 @@ const ClientActivePositionsPage = ({ client: initialClient, onBack, onNavigateTo
                 const clientData = response?.clients?.[0] || {};
                 const posList = clientData.positions || [];
                 setPositions(posList);
+                clientPositionsCache.set(String(clientId), posList);
+                if (clientPositionsCache.size > 25) {
+                    const oldest = clientPositionsCache.keys().next().value;
+                    clientPositionsCache.delete(oldest);
+                }
             } catch (err) {
                 console.error('Failed to fetch client positions:', err);
             } finally {
@@ -148,7 +158,7 @@ const ClientActivePositionsPage = ({ client: initialClient, onBack, onNavigateTo
                             </tr>
                         </thead>
                         <tbody className="text-[13px] sm:text-[14px] text-slate-300">
-                            {loading ? (
+                            {loading && positions.length === 0 ? (
                                 <tr><td colSpan="10" className="px-4 py-10 text-center text-slate-500">Loading positions...</td></tr>
                             ) : positions.length === 0 ? (
                                 <tr><td colSpan="10" className="px-4 py-10 text-center text-slate-500">No active positions.</td></tr>
